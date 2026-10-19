@@ -68,4 +68,4 @@ défaut acceptées) · Générer les brouillons (brouillons de la gestion des PS
 modifications sont conservées) · Exportation et réimportation Word.
 
 Ce dépôt contient le moteur (`crg_writer/`, bibliothèque standard Python seulement), ses tests et ses outils.
-L'ancienne application autonome (*Policy Builder* 0.2.0) est conservée sous l'étiquette `policy-builder-0.2.0-beta`.
+L'ancienne application autonome (*Policy Builder* 0.2.0) est conservée dans la branche `legacy/policy-builder-0.2.0`.
