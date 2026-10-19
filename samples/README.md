@@ -1,6 +1,10 @@
-# Sample output (fictional organization)
+# Sample drafts (fictional organization)
 
-`Northstar_fictional_sample_package_EN_FR.zip` was generated from the synthetic “Northstar Digital Services”
-fixture (`tests/conftest.py`): a 35-person Montreal SaaS company. Twelve policies, three standards and four procedures in
-English and French (package depth “policies, standards and procedures”). Northstar is fictional; nothing in the package describes a
-real organization. Highlighted brackets are the decisions the fixture left open.
+Word drafts written by the Security Policy Writer engine for **Northstar Digital Services**, the fictional
+35-person Montreal SaaS company of the tests (`tests/conftest.py`): the enterprise policy, four topic
+policies, the authentication standard and the incident-response procedure, in English and French. Rebuild
+them with `python3 tools/make_samples.py`.
+
+Northstar is fictional; nothing here describes a real organization. Highlighted brackets are decisions the
+fixture left open. In CyberRiskGuardian the same documents are ISP management drafts; these files show the
+Word export. Not legal advice.

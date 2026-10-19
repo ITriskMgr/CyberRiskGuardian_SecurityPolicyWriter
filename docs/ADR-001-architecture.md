@@ -1,4 +1,4 @@
-# ADR-001 — Architecture of the CyberRiskGuardian Policy Builder (MVP)
+# ADR-001 — Architecture of the standalone Policy Builder (superseded by ADR-002)
 
 **Status:** Accepted for the MVP · **Date:** 2026-10-19 · **Author:** Marc-André Léger (product owner), drafted with Claude
 

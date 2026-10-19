@@ -1,23 +1,16 @@
-# Threat model (beta 0.2.0)
+# Threat model — Security Policy Writer 0.1.0 (in CyberRiskGuardian Desktop 1.7.0)
 
-Scope: a single-computer deployment (server bound to 127.0.0.1) used by one organization or a consultant with
-several workspaces. Assets: organization answers, uploaded documents (often confidential), drafts, exports,
-the Anthropic API key.
+Scope: the Writer module of CyberRiskGuardian Desktop on one computer. The browser holds the workspace; the local
+helper (127.0.0.1, requests must carry `X-CRG: 1` and a loopback Host) runs the stateless engine.
 
-| Threat (spec §14.3) | Control in this version | Residual risk / next step |
+| Threat | Control | Residual risk / next step |
 |---|---|---|
-| Prompt injection in uploaded documents | Passages matching instruction patterns are flagged, shown to the user, and never sent to the AI; documents are wrapped as `<untrusted_document>`; AI facts must quote text that exists verbatim in the passage; outputs are schema-validated; the model has no tools. | Pattern detection is heuristic; AI extraction is off by default per project. |
-| Indirect compromise of generated policy text | AI may only reword existing clauses: same IDs, same placeholders, no new numbers, same modal verbs, bounded length; otherwise the deterministic text is kept and a finding is recorded. | A subtle meaning change without new numbers is possible — every clause still needs human review. |
-| Hallucinated legal requirements | Laws are candidates from a versioned ruleset; only a named reviewer can mark one applicable; law-specific clauses are withheld until then; “Not verified” label. | Ruleset dated 2026-10-19; URLs must be re-verified. |
-| Cross-tenant leakage | Every row carries `workspace_id`; lookups go through `get_project` / `scoped_get`; other tenants receive 404; files stored under workspace/project prefixes. | Tested for projects, sources, facts, policies, exports, audit. |
-| Unauthorized approvals | No approval function exists yet; every document is DRAFT in the app and in Word. | Approval workflow is backlog. |
-| Malicious office files / parser attacks | Content sniffing, macro-enabled and legacy OLE refused, archive bomb limits (entries, size, ratio), 500-page PDF limit, row limits, upload size limit, sanitized file names, no execution of embedded content. | Parsers run in-process (no sandbox); malware scanning is not included — scan files before upload in high-risk settings. |
-| Access to deleted content | Project deletion removes DB rows (cascade), encrypted files and exports; source deletion removes segments and facts. | SQLite free pages may retain data until VACUUM; backups are the operator’s responsibility. |
-| Source exfiltration via logs | Audit records hold IDs, hashes and counts, never document text; prompts are not logged. | — |
-| Data at rest | Uploaded files and extracted text encrypted with Fernet; key in `data/pb-key` (mode 600) or `PB_ENCRYPTION_KEY`. | Database fields other than evidence text (answers, drafts) are not encrypted; use full-disk encryption. |
-| Session theft / CSRF / XSS | HttpOnly SameSite=Strict cookie, server-side sessions, custom header required on state-changing calls, strict CSP (`script-src 'self'`), all dynamic HTML escaped. | Set `PB_SECURE_COOKIES=1` behind TLS. |
-| Export of an outdated draft as approved | Exports always say DRAFT; stale drafts are flagged; version and generation time are in the document. | — |
-| Generation denial of service | Synchronous jobs, upload and row limits, AI token and timeout limits. | Add rate limits before any multi-user network exposure. |
-| Inconsistent translations | EN and FR share clause IDs; editing one language opens a translation-review finding for the other. | Legal equivalence of translations is never assumed. |
-| OCR of hostile images | Image type sniffed from content; Pillow decompression-bomb limit (60 megapixels) and 100-page cap; OCR runs locally only after the user asks, per document; recognized text goes through the same injection flagging. | OCR errors can change meaning — facts from OCR get lower confidence and the page confidence is shown. |
-| Forged or foreign Word re-imports | The file must carry a document ID that belongs to the caller’s project (tenant-scoped), must pass the same Office safety checks as uploads, and changes are only proposals until a person accepts them; applying creates a new version. | A user who edits hidden bookmarks can mis-attach text to another clause — every change is shown before it is accepted. |
+| Prompt injection in documents | Paragraphs matching instruction patterns are set aside, listed, never read for facts and never sent to a model; AI facts are kept only when their quote is found verbatim in the text sent and their type is allowed; the AI preview shows the payload before anything leaves. | Pattern detection is heuristic. |
+| AI changing meaning while rewording | Rewording refused when placeholders change, a number appears, the modal verb changes or the length moves outside 0.5–1.8×; the person ticks what to apply; history records it. | Subtle meaning changes remain possible — every statement is reviewed before approval in ISP management. |
+| Hallucinated legal requirements | Laws are candidates; CRGO's state is evidence; a named reviewer and a rationale are required; law-gated clauses wait for "applies". | Ruleset dated 2026-10-19; links must be re-verified. |
+| Changing an approved policy | The Writer and Word re-import change drafts only; ISP management freezes approved versions with SHA-256 and checks the hash at publication. | — |
+| Losing edits on regeneration | Statements, clauses and fields edited after the last generation are kept and counted as "kept as edited". | Deleted generated statements come back on regeneration unless the document is changed in Word or the editor. |
+| Malicious Word files on re-import | ZIP checks (size, entries, macros refused), XML parsed with the standard library, only the policy's own identifier accepted, changes are proposals. | ElementTree is not hardened against every XML attack; files come from the person's own export. |
+| Hostile images and PDFs (OCR) | 60 MB limit, 100 pages, type sniffed, recognition by local tools in a temporary folder deleted afterwards; OCR facts get lower confidence. | Tesseract and Poppler run with the user's rights. |
+| Exposure of documents | Text never leaves the computer except through an AI request the person previews and sends under the installation's routing policy (features `writer_facts`, `writer_tailor`). | — |
+| Misleading compliance | Word and ISP drafts say DRAFT; mappings are labelled as topics, never compliance; acknowledgement is never compliance. | — |

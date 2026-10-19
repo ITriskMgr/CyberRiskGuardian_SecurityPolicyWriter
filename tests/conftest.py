@@ -1,53 +1,8 @@
-import io
-import os
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("PB_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("PB_DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
-    monkeypatch.setenv("PB_AI_PROVIDER", "mock")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    from app import config, db, security
-    from app.drafting import ai
-    config.settings = config.Settings()
-    security.reset_crypto()
-    ai.set_provider(None)
-    db.init_engine(config.settings.database_url)
-    db.create_all()
-    from fastapi.testclient import TestClient
-    from app.main import app
-    with TestClient(app) as c:
-        c.headers.update({"x-requested-with": "policybuilder"})
-        yield c
-    ai.set_provider(None)
-
-
-def register(c, email="owner@northstar.example", ws="Northstar workspace"):
-    r = c.post("/api/auth/register", json={"email": email, "password": "correct-horse-battery", "display_name": "Test Owner",
-                                           "workspace_name": ws})
-    assert r.status_code == 200, r.text
-    return r
-
-
-def new_project(c, name="Northstar policies", lang="en", mode="standard"):
-    r = c.post("/api/projects", json={"name": name, "mode": mode, "doc_language": lang})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
-
-
-def answer(c, pid, code, value=None, status="answered"):
-    r = c.put(f"/api/projects/{pid}/answers/{code}", json={"value": value, "status": status})
-    assert r.status_code == 200, (code, r.text)
-    return r.json()
-
 
 # ---------------------------------------------------------------- synthetic organizations (fictional)
 SOFTWARE_QC = {  # (A) 35-person Montreal software firm using AWS / Microsoft 365
@@ -84,19 +39,27 @@ UNIVERSITY = {  # (D) university with research and student records
 ORGS = {"software_qc": SOFTWARE_QC, "food_ot": FOOD_OT, "health": HEALTH, "university": UNIVERSITY}
 
 
-def apply_answers(c, pid, answers):
-    for k, v in answers.items():
-        answer(c, pid, k, v)
+
+def answers(org: dict, **more) -> dict:
+    """Interview answers in the shape the CyberRiskGuardian workspace stores them."""
+    return {k: {"value": v, "status": "answered"} for k, v in {**org, **more}.items()}
 
 
-def make_docx(paragraphs, title=None) -> bytes:
-    import docx
-    d = docx.Document()
-    if title:
-        d.core_properties.title = title
-        d.add_heading(title, level=1)
-    for p in paragraphs:
-        d.add_paragraph(p)
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+def call(op, body=None):
+    from crg_writer import api
+    status, out = api.handle(op, body or {})
+    assert status == 200, (op, status, out)
+    return out
+
+
+def isp_policy(isp: dict, pid="POL-001"):
+    """What CyberRiskGuardian's ISP management stores for a Writer draft (mirror of js/writer.js applyDraft)."""
+    cmap, clauses = {}, []
+    for i, c in enumerate(isp["clauses"], 1):
+        cmap[c["wsec"]] = f"C{i}"
+        clauses.append({"id": f"C{i}", "heading": c["heading"], "text": c["text"]})
+    st = [{"id": f"{pid}.{i}", "text": s["text"], "modality": s["modality"], "clause": cmap[s["wsec"]], "refs": s["refs"], "guideline": False}
+          for i, s in enumerate(isp["statements"], 1)]
+    return {"id": pid, "reference": isp["reference"], "title": isp["title"], "type": isp["type"], "version": "0.1", "status": "draft",
+            "owner": isp["owner"], "approver": isp["approver"], "purpose": isp["purpose"], "scope": isp["scope"], "clauses": clauses,
+            "statements": st, "reviewMonths": isp.get("reviewMonths", 12), "history": []}

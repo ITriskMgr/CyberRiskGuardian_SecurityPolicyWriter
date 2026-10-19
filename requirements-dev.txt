@@ -1,5 +1,6 @@
--r requirements.txt
+# The engine (crg_writer/) uses the Python standard library only. These are for the tests.
 pytest>=8
-playwright>=1.45
-# Optional OCR engine when Tesseract is not installed:
-# rapidocr-onnxruntime>=1.2
+python-docx>=1.1      # cross-checks the Word files the engine writes
+pillow>=10            # builds the OCR test images
+# Optional OCR engines on the computer that runs CyberRiskGuardian: Tesseract (+ Poppler for scanned PDFs),
+# or the Python package rapidocr-onnxruntime.
