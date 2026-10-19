@@ -53,7 +53,7 @@ is included. The CyberRiskGuardian 0–1 risk-appetite scale is used for appetit
 
 ## Quick start
 
-Requirements: **Python 3.11+** (3.13 tested). No Node.js, no database server, no account elsewhere.
+Requirements: **Python 3.10+** (3.10 and 3.13 tested; the launcher finds a suitable Python by itself). No Node.js, no database server, no account elsewhere.
 
 | System | Start |
 |---|---|
