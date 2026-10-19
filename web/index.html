@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy Builder · CyberRiskGuardian</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/projects">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5 13 12 15 7-2 12-7.5 12-15V7L16 2z"/><path class="brand-lines" d="M11 13h10M11 17h10M11 21h6"/></svg>
+    <span><strong>Policy Builder</strong><small>CyberRiskGuardian</small></span>
+  </a>
+  <div class="topbar-right">
+    <div class="lang-toggle" role="group" aria-label="Interface language">
+      <button type="button" data-lang="en">EN</button><button type="button" data-lang="fr">FR</button>
+    </div>
+    <span id="who" class="who"></span>
+    <button type="button" id="logout" class="link-btn" hidden></button>
+  </div>
+</header>
+<div id="app" class="app"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
