@@ -18,7 +18,8 @@ from app.catalogue.rulesets import RULESET_VERSION
 from app.db import get_session, migrate
 from app.drafting.library import LIBRARY_VERSION
 from app.export import package
-from app.models import (AuditEvent, ExportJob, Issue, Membership, OrganizationFact, PolicyDocument, PolicyVersion, Project,
+from app.ingestion.ocr import engine_info as ocr_engine_info
+from app.models import (AuditEvent, Reimport, ExportJob, Issue, Membership, OrganizationFact, PolicyDocument, PolicyVersion, Project,
                         SourceDocument, User, Workspace, now)
 from app.questionnaire.questions import QUESTIONNAIRE_VERSION
 from app.security import (COOKIE, Ctx, audit, create_session, current_ctx, destroy_session, get_project, hash_password,
@@ -79,7 +80,7 @@ def meta():
     return {"app": config.APP_NAME, "version": config.APP_VERSION, "ai_provider": "anthropic" if s.ai_available else "mock",
             "ai_model": s.ai_model if s.ai_available else None, "questionnaire": QUESTIONNAIRE_VERSION,
             "catalogue": CATALOGUE_VERSION, "ruleset": RULESET_VERSION, "library": LIBRARY_VERSION,
-            "max_upload_mb": s.max_upload_mb}
+            "max_upload_mb": s.max_upload_mb, "ocr": ocr_engine_info()}
 
 
 class RegisterIn(BaseModel):
@@ -327,6 +328,7 @@ def list_sources(pid: str, ctx: Ctx = CTX, db: Session = DB):
         out.append({"id": s.id, "filename": s.filename, "mime": s.mime, "size": s.size, "category": s.category,
                     "title": s.title, "doc_date": s.doc_date, "state": s.ingestion_state, "warnings": s.warnings,
                     "facts": len(facts), "pending": sum(1 for f in facts if f.state == "proposed"),
+                    "ocr_pages": s.ocr_pages or [], "ocr_meta": s.ocr_meta or {},
                     "uploaded_at": s.created_at.isoformat()})
     return out
 
@@ -335,6 +337,15 @@ def list_sources(pid: str, ctx: Ctx = CTX, db: Session = DB):
 def source_segments(sid: str, ctx: Ctx = CTX, db: Session = DB):
     src = scoped_get(db, ctx, SourceDocument, sid)
     return {"filename": src.filename, "segments": S.segments_view(db, src)}
+
+
+@app.post("/api/sources/{sid}/ocr")
+def source_ocr(sid: str, ctx: Ctx = CTX, db: Session = DB):
+    src = scoped_get(db, ctx, SourceDocument, sid)
+    ctx.require("author")
+    res = S.run_ocr(db, ctx, get_project(db, ctx, src.project_id), src)
+    db.commit()
+    return res
 
 
 @app.delete("/api/sources/{sid}")
@@ -472,6 +483,62 @@ def patch_clause(doc_id: str, clause_id: str, body: ClauseEdit, ctx: Ctx = CTX, 
     v = S.edit_clause(db, ctx, p, d, clause_id, _lang(body.lang), body.text)
     db.commit()
     return {"version_no": v.version_no}
+
+
+# ------------------------------------------------------------------ Word re-import
+@app.post("/api/projects/{pid}/reimports")
+async def upload_reimport(pid: str, file: UploadFile = File(...), ctx: Ctx = CTX, db: Session = DB):
+    p = get_project(db, ctx, pid)
+    ctx.require("author")
+    data = await file.read(config.settings.max_upload_mb * 1024 * 1024 + 1)
+    ri = S.create_reimport(db, ctx, p, file.filename or "edited.docx", data)
+    db.commit()
+    return S.reimport_view(db, ri)
+
+
+@app.get("/api/projects/{pid}/reimports")
+def list_reimports(pid: str, ctx: Ctx = CTX, db: Session = DB):
+    p = get_project(db, ctx, pid)
+    rows = db.scalars(select(Reimport).where(Reimport.project_id == p.id).order_by(Reimport.created_at.desc())).all()
+    return [{k: v for k, v in S.reimport_view(db, r).items() if k != "changes"} | {"changes": len(r.changes)} for r in rows]
+
+
+@app.get("/api/reimports/{rid}")
+def get_reimport(rid: str, ctx: Ctx = CTX, db: Session = DB):
+    return S.reimport_view(db, scoped_get(db, ctx, Reimport, rid))
+
+
+class ReimportDecisions(BaseModel):
+    decisions: dict[str, str]
+
+
+@app.post("/api/reimports/{rid}/decisions")
+def reimport_decisions(rid: str, body: ReimportDecisions, ctx: Ctx = CTX, db: Session = DB):
+    ri = scoped_get(db, ctx, Reimport, rid)
+    ctx.require("author")
+    S.decide_reimport(db, ctx, ri, body.decisions)
+    db.commit()
+    return S.reimport_view(db, ri)
+
+
+@app.post("/api/reimports/{rid}/apply")
+def reimport_apply(rid: str, ctx: Ctx = CTX, db: Session = DB):
+    ri = scoped_get(db, ctx, Reimport, rid)
+    ctx.require("author")
+    v = S.apply_reimport(db, ctx, get_project(db, ctx, ri.project_id), ri)
+    db.commit()
+    return {"version_no": v}
+
+
+@app.post("/api/reimports/{rid}/discard")
+def reimport_discard(rid: str, ctx: Ctx = CTX, db: Session = DB):
+    ri = scoped_get(db, ctx, Reimport, rid)
+    ctx.require("author")
+    if ri.status == "pending":
+        ri.status = "discarded"
+        audit(db, ctx, "reimport.discard", "reimport", ri.id, ri.project_id)
+        db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/projects/{pid}/issues")

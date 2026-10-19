@@ -12,7 +12,8 @@ test or a reproducible manual path.
 | E — Outline and drafting pipeline (mock, then Claude) | Done (MVP) | Deterministic composer from 483 bilingual clause definitions, typed placeholders, gaps, QA checks; Claude adapter with validation; outline approval step not separate |
 | F — Word export, ZIP, regression tests | Done | Native .docx, reports, CSV, ZIP; validated with the OOXML validator and LibreOffice rendering |
 | G — Review, issues, versioning, roles | Partial | Issues with acknowledge/resolve, versions on regenerate and on edit, RBAC (admin/owner/author/reviewer/auditor). Missing: reviewer assignment, approval workflow, immutable approved snapshots |
-| H — Hardening, bilingual generation, catalogue, operations docs | Partial | Bilingual generation done; threat model; missing: SSO, PostgreSQL deployment guide, job queue, OCR |
+| H — Hardening, bilingual generation, catalogue, operations docs | Partial | Bilingual generation, threat model, OCR with consent (0.2.0); missing: SSO, PostgreSQL deployment guide, job queue |
+| 0.2.0 — Standards, procedures, OCR, Word re-import | Done | 4 standards + 4 procedures (EN/FR), OCR (Tesseract or RapidOCR) after explicit consent, Word re-import with bookmarks, number fallback and per-clause decisions; `test_levels_ocr_reimport`, `tests/e2e/test_ui_v2.py` |
 
 ## Acceptance tests (spec §18)
 
@@ -39,9 +40,9 @@ test or a reproducible manual path.
 
 1. Review and approval workflow: reviewer assignment, legal sign-off gate, executive approval by a named human,
    SHA-256-frozen approved versions (same model as the CyberRiskGuardian desktop ISP module).
-2. Standards generation (level 3) for authentication, classification handling, cryptography and logging, so
-   numeric parameters leave the policies.
-3. Word re-import using the embedded document identifier; clause-level diff.
+2. Standards and procedures for the remaining topics (vulnerability remediation SLAs, secure configuration
+   baselines, supplier assessment, change management).
+3. Re-import of table edits and Word tracked changes (accept/reject inside Word).
 4. CyberRiskGuardian connector: read risk scenarios and KRIs to prioritize policies and map clauses to treated
    risks (`PolicyClause → addresses → ControlObjective`, `Control → treats → RiskScenario`) through the CRGO ontology.
-5. Complete the five structure templates as full clause libraries; OCR with accuracy warnings.
+5. Complete the five structure templates as full clause libraries.

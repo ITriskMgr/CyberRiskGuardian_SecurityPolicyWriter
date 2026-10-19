@@ -120,18 +120,18 @@ async function projectsView() {
 
 // ---------------------------------------------------------------- project shell
 async function projectView(pid, step, arg) {
-  if (!STEPS.includes(step) && step !== "policy") step = "interview";
+  if (!STEPS.includes(step) && !["policy", "reimport"].includes(step)) step = "interview";
   const p = await api(`/projects/${pid}`);
   $app.className = "app";
   const doneIdx = { PROJECT_CREATED: 0, DISCOVERY_IN_PROGRESS: 1, EVIDENCE_REVIEW: 2, APPLICABILITY_REVIEW: 4, LIBRARY_CONFIRMED: 5, OUTLINE_REVIEW: 6, DRAFT_GENERATED: 7 }[p.workflow_state] ?? 0;
-  const cur = step === "policy" ? "drafts" : step;
+  const cur = ["policy", "reimport"].includes(step) ? "drafts" : step;
   $app.innerHTML = `<nav class="rail" aria-label="Project steps"><h2>${esc(p.name)}</h2><p class="sub">${esc(p.org_display_name || "")}</p>
     <ol class="steps">${STEPS.map((s, i) => `<li><a href="#/p/${esc(pid)}/${s}" class="${i <= doneIdx ? "done" : ""}" ${s === cur ? 'aria-current="page"' : ""}>
       <span>${esc(t("steps")[i])}${s === "drafts" && p.stale ? ` <span class="badge medium">${p.stale}</span>` : ""}</span></a></li>`).join("")}</ol>
     <a class="back" href="#/projects">${esc(t("all_projects"))}</a></nav><main class="page" id="main"></main>`;
   const main = document.getElementById("main");
   const views = { setup: setupView, interview: interviewView, documents: documentsView, profile: profileView, applicability: applicabilityView,
-    library: libraryView, decisions: decisionsView, drafts: draftsView, export: exportView, policy: policyView };
+    library: libraryView, decisions: decisionsView, drafts: draftsView, export: exportView, policy: policyView, reimport: reimportView };
   await views[step](main, p, arg);
   main.focus?.();
 }
@@ -261,14 +261,16 @@ async function documentsView(main, p) {
   const cats = t("cats");
   main.innerHTML = head(t("documents"), t("documents_sub")) + `
     <section class="panel"><div class="drop" id="drop">
-      <p>${esc(t("drop"))} <label class="link-btn" style="cursor:pointer">${esc(t("browse"))}<input type="file" id="file" multiple hidden accept=".docx,.pdf,.txt,.md,.csv,.xlsx"></label></p>
+      <p>${esc(t("drop"))} <label class="link-btn" style="cursor:pointer">${esc(t("browse"))}<input type="file" id="file" multiple hidden accept=".docx,.pdf,.txt,.md,.csv,.xlsx,.png,.jpg,.jpeg,.tif,.tiff"></label></p>
       <label class="small">${esc(t("category"))} <select id="cat" style="width:auto">${Object.entries(cats).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
       <p class="small muted">${esc(t("accepted"))}</p><div id="up" class="small"></div></div>
       ${p.ai_on_sources ? `<p class="note warn small">${esc(t("ai_sources_help"))}</p>` : ""}</section>
     <section class="panel"><h2>${esc(t("sources"))}</h2>${sources.length ? `<table class="list"><thead><tr><th>${esc(t("document"))}</th><th>${esc(t("category"))}</th><th>${esc(t("facts"))}</th><th></th></tr></thead><tbody>
       ${sources.map((s) => `<tr><td><strong>${esc(s.filename)}</strong>${s.title ? `<div class="small muted">${esc(s.title)}</div>` : ""}${s.warnings.map((w) => `<div class="small" style="color:var(--warn)">⚠ ${esc(w)}</div>`).join("")}</td>
         <td class="small">${esc(cats[s.category] || s.category)}</td><td>${s.facts}${s.pending ? ` <span class="badge medium">${s.pending}</span>` : ""}</td>
-        <td class="row"><button class="btn sm quiet seg" data-id="${esc(s.id)}">${esc(t("view_text"))}</button><button class="btn sm danger delsrc" data-id="${esc(s.id)}">${esc(t("delete"))}</button></td></tr>
+        <td class="row">${s.ocr_pages.length ? (META?.ocr?.available ? `<button class="btn sm ocr" data-id="${esc(s.id)}" title="${esc(t("ocr_consent"))}">${esc(t("ocr_run"))} (${s.ocr_pages.length})</button>` : `<span class="small" style="color:var(--warn)">${esc(t("ocr_missing"))}</span>`) : ""}
+          ${s.ocr_meta && s.ocr_meta.engine ? `<span class="badge ${s.ocr_meta.mean_confidence < 70 ? "medium" : ""}">OCR ${Math.round(s.ocr_meta.mean_confidence)}%</span>` : ""}
+          <button class="btn sm quiet seg" data-id="${esc(s.id)}">${esc(t("view_text"))}</button><button class="btn sm danger delsrc" data-id="${esc(s.id)}">${esc(t("delete"))}</button></td></tr>
         <tr hidden id="seg-${esc(s.id)}"><td colspan="4"></td></tr>`).join("")}</tbody></table>` : `<p class="muted">${esc(t("none_yet"))}</p>`}</section>
     <section class="panel"><h2>${esc(t("facts"))}</h2><p class="muted small">${esc(t("facts_sub"))}</p>
       ${facts.length ? `<table class="list"><tbody>${facts.map((f) => `<tr>
@@ -290,6 +292,12 @@ async function documentsView(main, p) {
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); upload([...e.dataTransfer.files]); });
+  on(main, ".ocr", "click", async (e, b) => {
+    if (!confirm(t("ocr_consent"))) return;
+    b.disabled = true; b.innerHTML = `<span class="spinner"></span> ${esc(t("ocr_running"))}`;
+    try { const r = await api(`/sources/${b.dataset.id}/ocr`, { method: "POST" }); toast(`${t("ocr_done")} ${r.pages} · ${Math.round(r.mean_confidence)}%`); } catch {}
+    documentsView(main, p);
+  });
   on(main, ".delsrc", "click", async (e, b) => { if (!confirm(t("delete") + "?")) return; await api(`/sources/${b.dataset.id}`, { method: "DELETE" }); documentsView(main, p); });
   on(main, ".fact", "click", async (e, b) => { await api(`/facts/${b.dataset.id}/decision`, { method: "POST", body: { action: b.dataset.a } }); documentsView(main, p); });
   on(main, ".seg", "click", async (e, b) => {
@@ -368,7 +376,7 @@ async function decisionsView(main, p) {
 
 // ---------------------------------------------------------------- drafts
 async function draftsView(main, p) {
-  const [pols, issues] = await Promise.all([api(`/projects/${p.id}/policies`), api(`/projects/${p.id}/issues`)]);
+  const [pols, issues, reimports] = await Promise.all([api(`/projects/${p.id}/policies`), api(`/projects/${p.id}/issues`), api(`/projects/${p.id}/reimports`)]);
   const live = META?.ai_provider === "anthropic";
   main.innerHTML = head(t("drafts"), t("drafts_sub")) + (pols.length ? `
     <section class="panel"><div class="row"><button class="btn" id="genall">${esc(t("generate_all"))}</button>
@@ -380,7 +388,17 @@ async function draftsView(main, p) {
       <td class="small">${x.version ? `${esc(t("version"))} 0.${x.version}${x.stale ? ` <span class="badge medium">${esc(t("stale"))}</span>` : ""}` : `<span class="muted">${esc(t("not_generated"))}</span>`}
         ${x.summary ? `<div class="muted">${x.summary.clauses} ${esc(t("clauses"))} · ${x.summary.open_decisions} ${esc(t("open_dec"))}${x.summary.gaps ? ` · ${x.summary.gaps} ${esc(t("gaps"))}` : ""}</div>` : ""}</td>
       <td>${x.version ? `<a class="btn sm ghost" href="#/p/${esc(p.id)}/policy/${esc(x.id)}">${esc(t("view"))}</a>` : ""}</td></tr>`).join("")}</tbody></table></section>
+    <section class="panel"><h2>${esc(t("reimport"))}</h2><p class="small muted">${esc(t("reimport_sub"))}</p>
+      <label class="btn ghost">${esc(t("reimport_choose"))}<input type="file" id="reimp" hidden accept=".docx"></label>
+      ${reimports.length ? `<table class="list" style="margin-top:10px"><tbody>${reimports.map((r) => `<tr><td><strong>${esc(r.filename)}</strong><div class="small muted">${esc(r.policy_id)} · ${esc(r.language.toUpperCase())} · ${esc(t("version"))} 0.${r.base_version}</div></td>
+        <td class="small">${r.changes} ${esc(t("ri_changes"))}</td><td><span class="badge ${r.status === "applied" ? "ok" : r.status === "pending" ? "medium" : ""}">${esc(t("ri_status")[r.status])}${r.applied_version ? " → 0." + r.applied_version : ""}</span></td>
+        <td><a class="btn sm ghost" href="#/p/${esc(p.id)}/reimport/${esc(r.id)}">${esc(t("view"))}</a></td></tr>`).join("")}</tbody></table>` : ""}</section>
     ${issuesHTML(issues)}` : `<section class="panel"><p class="muted">${esc(t("no_selection"))}</p></section>`);
+  document.getElementById("reimp")?.addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    try { const r = await api(`/projects/${p.id}/reimports`, { method: "POST", body: fd }); location.hash = `#/p/${p.id}/reimport/${r.id}`; } catch {}
+  });
   const gen = async (btn, codes) => {
     busy(btn, true);
     try { await api(`/projects/${p.id}/generate`, { method: "POST", body: { codes, tailor_with_ai: document.getElementById("tailor")?.checked || false } }); toast(t("generated")); route(); }
@@ -416,11 +434,11 @@ async function policyView(main, p, docId) {
       <h2>${esc(b.title)}</h2><div class="doc-meta">${esc(b.organization)} · ${esc(b.policy_id)} · ${esc(t("version"))} ${esc(b.version)} · ${esc(b.level_label)}</div>
       ${b.sections.map((s) => `<h3>${esc(s.number)}. ${esc(s.heading)}</h3>${s.clauses.map((c) => `
         <div class="clause ${c.edited ? "edited" : ""}" data-id="${esc(c.clause_id)}"><div class="num">${esc(c.number)}</div>
-          <div><div class="txt">${marked(c.text)}</div>
+          <div><div class="txt">${c.table ? `${marked(c.table_intro || "")}<div class="tbl-wrap"><table class="list doc-table"><thead><tr>${(c.table_cols || []).map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${c.table.map((r) => `<tr>${r.map((x) => `<td>${marked(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : marked(c.text)}</div>
           <div class="meta"><span class="badge ${c.source_type === "open_decision" ? "high" : c.source_type === "framework_recommendation" ? "" : "ok"}">${esc(basis[c.source_type] || c.source_type)}</span>
             ${c.legal_review ? `<span class="badge medium">${esc(t("legal"))}</span>` : ""}${c.edited ? `<span class="badge seal">${esc(t("edited"))}</span>` : ""}${c.ai_tailored ? `<span class="badge seal">AI</span>` : ""}
             <span title="${esc(t("refs"))}">${esc(c.framework_refs.join(", "))}</span>
-            <button class="link-btn small ed">${esc(t("edit_clause"))}</button></div>
+            ${c.table ? "" : `<button class="link-btn small ed">${esc(t("edit_clause"))}</button>`}</div>
           <div class="edit-area" hidden><textarea>${esc(c.text)}</textarea><div class="row"><button class="btn sm sv">${esc(t("save_clause"))}</button><button class="btn sm quiet cx">${esc(t("cancel"))}</button></div></div>
           </div></div>`).join("")}`).join("")}
     </article><aside class="side">
@@ -443,6 +461,34 @@ async function policyView(main, p, docId) {
     const job = await api(`/projects/${p.id}/exports`, { method: "POST", body: { kind: "docx", document_id: docId, lang: dlang }, noLang: true });
     location.href = job.download;
   });
+}
+
+// ---------------------------------------------------------------- Word re-import comparison
+const diffHTML = (ops) => ops.map(([k, txt]) => k === "eq" ? marked(txt) : k === "del" ? `<del class="d-del">${esc(txt)}</del>` : `<ins class="d-ins">${esc(txt)}</ins>`).join("");
+async function reimportView(main, p, rid) {
+  const r = await api(`/reimports/${rid}`);
+  const pending = r.status === "pending";
+  const kindBadge = { modified: "seal", deleted: "high", added: "ok" };
+  main.innerHTML = `<div class="page-head"><div><a href="#/p/${esc(p.id)}/drafts" class="small">← ${esc(t("drafts"))}</a>
+      <h1>${esc(t("reimport_title"))}</h1><p>${esc(r.title)} · ${esc(r.policy_id)} · ${esc(r.filename)} · ${esc(t("version"))} 0.${r.base_version} · ${esc(r.language.toUpperCase())}</p></div>
+      ${pending && r.changes.length ? `<div class="row"><button class="btn quiet" id="allno">${esc(t("ri_reject_all"))}</button><button class="btn ghost" id="allyes">${esc(t("ri_accept_all"))}</button><button class="btn" id="apply">${esc(t("ri_apply"))}</button></div>` : ""}</div>
+    ${r.warnings.map((w) => `<p class="note warn small">${esc(w)}</p>`).join("")}
+    ${!pending ? `<p class="note">${esc(t("ri_status")[r.status])}${r.applied_version ? ` — ${esc(t("version"))} 0.${r.applied_version}` : ""}</p>` : ""}
+    ${r.changes.length ? r.changes.map((ch) => `<section class="panel change" data-key="${esc(ch.key)}">
+      <div class="row"><span class="badge ${kindBadge[ch.kind]}">${esc(t("ri_kind")[ch.kind])}</span><strong>${esc(ch.number || "")}</strong><span class="small muted">${esc(ch.clause_id || t("ri_new_after") + " " + (ch.after || "—"))}${ch.match === "number" ? " · " + esc(t("ri_by_number")) : ""}</span>
+        ${ch.modality_from && ch.modality_to && ch.modality_from !== ch.modality_to ? `<span class="badge medium">${esc(t("ri_modality"))}: ${esc(ch.modality_from)} → ${esc(ch.modality_to)}</span>` : ""}
+        <span class="grow"></span>${pending ? `<div class="lang-toggle" role="group"><button data-d="accept" aria-pressed="${ch.decision === "accept"}">${esc(t("ri_accept"))}</button><button data-d="reject" aria-pressed="${ch.decision === "reject"}">${esc(t("ri_reject"))}</button></div>` : `<span class="badge">${esc(t("ri_dec")[ch.decision])}</span>`}</div>
+      <div class="doc diff">${diffHTML(ch.diff)}</div></section>`).join("") : `<section class="panel"><p>${esc(t("ri_none"))}</p></section>`}
+    ${pending ? `<p><button class="btn danger" id="discard">${esc(t("ri_discard"))}</button></p>` : ""}`;
+  const send = async (decisions) => { await api(`/reimports/${rid}/decisions`, { method: "POST", body: { decisions } }); reimportView(main, p, rid); };
+  on(main, ".change [data-d]", "click", (e, b) => send({ [b.closest(".change").dataset.key]: b.dataset.d }));
+  document.getElementById("allyes")?.addEventListener("click", () => send(Object.fromEntries(r.changes.map((c) => [c.key, "accept"]))));
+  document.getElementById("allno")?.addEventListener("click", () => send(Object.fromEntries(r.changes.map((c) => [c.key, "reject"]))));
+  document.getElementById("apply")?.addEventListener("click", async () => {
+    const res = await api(`/reimports/${rid}/apply`, { method: "POST" }); toast(`${t("ri_applied")} 0.${res.version_no}`);
+    location.hash = `#/p/${p.id}/policy/${r.document_id}`;
+  });
+  document.getElementById("discard")?.addEventListener("click", async () => { await api(`/reimports/${rid}/discard`, { method: "POST" }); location.hash = `#/p/${p.id}/drafts`; });
 }
 
 // ---------------------------------------------------------------- export

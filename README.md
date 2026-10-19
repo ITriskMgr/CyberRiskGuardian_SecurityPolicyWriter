@@ -9,7 +9,7 @@ policies), asks for the decisions only the organization can make, and produces *
 drafts in English, French or both**. Every clause shows what it is based on, and every gap is a highlighted
 placeholder rather than an invented fact.
 
-> **Beta 0.1.0.** Generated documents are drafts. They are not legal advice and are not in force until the
+> **Beta 0.2.0.** Generated documents are drafts. They are not legal advice and are not in force until the
 > organization’s authorized people review and approve them. Framework references show the topics a clause
 > addresses; they are not evidence of conformity.
 
@@ -23,13 +23,14 @@ placeholder rather than an invented fact.
 |---|---|
 | 1. Project | Name, interview depth (Express ≈ 21 questions, Standard ≈ 59), document language (EN, FR, or both as separate native files). |
 | 2. Interview | Company, industry, size, jurisdictions, data, technology, governance roles, objectives. Industry branches (healthcare, OT/manufacturing, SaaS, education/research, finance). Every question has *Unknown*, *Decide later* and, where relevant, *Not applicable*. |
-| 3. Documents | Upload DOCX, text PDF, TXT, Markdown, CSV, XLSX. Text is extracted locally with page/section locators, stored encrypted, and turned into **proposed** facts that quote their source passage. Contradictions between documents are flagged; nothing is applied until you confirm it. |
+| 3. Documents | Upload DOCX, PDF, TXT, Markdown, CSV, XLSX — and **scanned PDFs or images (PNG, JPEG, TIFF)**, read by on-device text recognition (OCR) after you ask for it, with a confidence score per page. Text is extracted locally with page/section locators, stored encrypted, and turned into **proposed** facts that quote their source passage. Contradictions between documents are flagged; nothing is applied until you confirm it. |
 | 4. Profile | The confirmed organization profile, with the source of each answer (interview or document) and governance observations (e.g. “IT accepts business risk”, “no privacy officer listed”). |
 | 5. Legal candidates | Candidate laws, guidelines, contracts and frameworks (Quebec P-39.1 / Law 25, A-2.1, G-1.03, PIPEDA, PHIPA, GDPR, HIPAA, PCI DSS, OSFI B-13, NIS2, client contracts, ISO/IEC 27001, NIST CSF 2.0). **None is ever treated as applicable until a named reviewer records a decision with a rationale.** Clauses that depend on a law are withheld until then. |
-| 6. Policy library | 20 catalogue documents (15 with full bilingual clause libraries, 5 structure templates), each with a priority score and the reasons it is — or is not — recommended for this organization. |
-| 7. Decisions | 33 material decisions (MFA scope, leaver deadline, remediation timeframes, exception approver, RTO, monitoring, AI data rules…), each with a common-practice suggestion you may adopt explicitly. |
+| 6. Policy library | 28 catalogue documents across four levels: the enterprise policy, 19 topic policies (14 with full bilingual clause libraries, 5 structure templates), **4 standards** (authentication and passwords, information handling matrix, cryptography, logging) and **4 procedures** (incident response, access provisioning and revocation, exception requests, backup restoration tests). Each has a priority score and the reasons it is — or is not — recommended; standards and procedures follow the package depth chosen in the interview and their parent policy. |
+| 7. Decisions | 44 material decisions (MFA scope, leaver deadline, remediation timeframes, exception approver, RTO, monitoring, AI data rules…), each with a common-practice suggestion you may adopt explicitly. |
 | 8. Drafts & review | Structured drafts with stable clause IDs, numbering, source badges, legal-review flags, open decisions, implementation gaps and assumptions. Edit any clause (creates a new version; earlier versions are kept). Review findings: unresolved placeholders, broken cross-references, evidence conflicts, legal review, stale drafts. Optional rewording with Claude, validated so it cannot drop placeholders, add numbers, change “must” to “should” or add clauses. |
-| 9. Export | One policy as `.docx`, or a ZIP package: `01_Governance`, `02_Policies`, `05_Registers_Reports` (policy index, assumptions & open decisions, traceability summary + CSV, implementation-gap roadmap). |
+| 9. Export | One document as `.docx`, or a ZIP package: `01_Governance`, `02_Policies`, `03_Standards`, `04_Procedures`, `05_Registers_Reports` (policy index, assumptions & open decisions, traceability summary + CSV, implementation-gap roadmap). |
+| 10. Re-import | Edit a draft in Word, then bring it back: every modified, deleted or added clause is shown with a word-level comparison (and a warning when “should” became “must” or the reverse). You accept or reject each change; applying creates a new version and earlier versions stay intact. |
 
 ### The Word files
 
@@ -70,6 +71,27 @@ python serve.py 8120          # opens http://localhost:8120/
 
 The server listens on **127.0.0.1 only**. Create an account (it creates your workspace), then a project.
 Data lives in `./data` (SQLite database, encrypted uploads, exports, encryption key `data/pb-key`, mode 600).
+
+### Reading scanned documents (optional)
+
+Text recognition runs on your computer; nothing is sent elsewhere. Install one engine:
+
+| System | Command |
+|---|---|
+| macOS | `brew install tesseract tesseract-lang` |
+| Windows | Tesseract installer from UB Mannheim (add it to PATH, or set `PB_TESSERACT` in `.env`) |
+| Linux | `sudo apt install tesseract-ocr tesseract-ocr-fra` |
+| Any (pure Python) | `pip install rapidocr-onnxruntime` |
+
+Scanned files are stored but **not read until you click *Run text recognition*** in Documents. Recognized
+passages carry their page and confidence (“p. 3 (OCR 92%)”), facts from them get a lower confidence, and
+low-confidence pages are listed.
+
+### Re-importing Word drafts
+
+Every exported clause carries a hidden Word bookmark with its stable clause ID, and the file properties carry
+the document ID and version. Edit freely in Word or LibreOffice (both preserve them), then use *Re-import an
+edited Word draft* in Drafts and review. If a marker is lost, the clause is matched by its number and flagged.
 
 ### Using Claude (optional)
 
@@ -113,7 +135,7 @@ files are rendered on demand.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests -q            # 32 unit/integration/security tests, no network, no API key
+python -m pytest tests -q            # 41 tests incl. two browser walkthroughs; no network, no API key
 python -m pytest tests/e2e -q        # browser walkthrough (Playwright + Chromium)
 ```
 
@@ -124,17 +146,23 @@ unauthenticated access, CSRF header, auditor read-only, hostile uploads (disguis
 macro-enabled, archive bomb, path traversal, duplicate), prompt-injection documents never sent to the AI,
 ungrounded AI facts discarded, AI rewording that removes placeholders / adds numbers / weakens “must” /
 injects clauses rejected, candidate laws never applicable without a named reviewer, obligation-gated clauses,
-contradictory documents surfaced and not silently resolved, four synthetic organizations (Montreal SaaS,
+contradictory documents surfaced and not silently resolved, standards and procedures by package depth with
+real Word tables, OCR only after consent on scanned PNG and PDF, oversized images refused, Word re-import
+(bookmark match, number fallback, deletions, additions, requirement-strength change, apply as new version,
+LibreOffice round-trip, foreign files refused), four synthetic organizations (Montreal SaaS,
 Quebec food manufacturer with OT, multi-jurisdiction healthcare network, university) in both languages, PDF
 and XLSX extraction, Anthropic wire format, mobile layout without horizontal scroll.
 
 ## Limitations (beta)
 
-- No OCR: scanned PDFs are reported, not read.
-- Standards and procedures (levels 3–4) are not generated yet; five catalogue entries are structure templates.
+- OCR quality depends on the scan; handwriting and complex layouts are not reliable. French OCR needs the Tesseract
+  French language data (`fra`).
+- Four standards and four procedures are provided; five topic entries are still structure templates.
+- Re-import compares clause text; edits inside tables (RACI, handling matrix, algorithm list) and heading changes are
+  not imported — change those in the application.
 - Review/approval workflow (reviewer assignment, executive approval, immutable approved snapshots) is not built:
   every document stays DRAFT.
-- Word re-import / tracked-change comparison, SSO, PostgreSQL deployment hardening and a job queue are backlog items.
+- SSO, PostgreSQL deployment hardening and a job queue are backlog items.
 - Rulesets and reference URLs are dated (2026-10-19) and must be re-verified; they are candidates, never legal conclusions.
 
 ## Licence
@@ -153,7 +181,7 @@ l’organisation et produit des **ébauches Word modifiables en français, en an
 (fichiers distincts partageant les mêmes identifiants de clauses). Chaque clause indique son fondement; chaque
 lacune devient un espace réservé surligné plutôt qu’un fait inventé.
 
-> **Bêta 0.1.0.** Les documents produits sont des ébauches. Ils ne constituent pas un avis juridique et n’entrent
+> **Bêta 0.2.0.** Les documents produits sont des ébauches. Ils ne constituent pas un avis juridique et n’entrent
 > pas en vigueur avant leur révision et leur approbation par les personnes autorisées de l’organisation.
 
 **Démarrage** : double-cliquez sur `start.command` (macOS), `start.bat` (Windows) ou lancez `./start.sh`
@@ -162,6 +190,10 @@ offre une bascule EN/FR sur tous les écrans; les données saisies par l’utili
 
 **Lois et référentiels** : les lois (Loi 25 / P-39.1, A-2.1, G-1.03, LPRPDE, etc.) sont proposées comme
 *candidates*. Aucune n’est considérée applicable avant qu’un réviseur nommé consigne une décision motivée.
+
+**Normes, procédures, ROC et réimportation** : l’application produit aussi 4 normes et 4 procédures (niveaux 3 et 4),
+lit les PDF numérisés et les images par reconnaissance de texte locale (après votre autorisation), et réimporte une
+ébauche modifiée dans Word en présentant chaque modification pour acceptation ou refus.
 
 **IA** : hors ligne par défaut. Claude peut être activé côté serveur (clé dans `.env`); les documents
 téléversés ne lui sont transmis que si le responsable du projet l’autorise explicitement.

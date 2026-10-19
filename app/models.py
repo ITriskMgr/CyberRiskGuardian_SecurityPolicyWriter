@@ -109,6 +109,8 @@ class SourceDocument(Base, Timestamped):
     error: Mapped[str] = mapped_column(Text, default="")
     blob_path: Mapped[str] = mapped_column(String(500))
     warnings: Mapped[list] = mapped_column(JSON, default=list)
+    ocr_pages: Mapped[list] = mapped_column(JSON, default=list)      # pages still needing OCR
+    ocr_meta: Mapped[dict] = mapped_column(JSON, default=dict)       # engine, pages, mean confidence
     uploaded_by: Mapped[str] = mapped_column(String(36))
 
 
@@ -251,3 +253,22 @@ class AuditEvent(Base):
     entity_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     details: Mapped[dict] = mapped_column(JSON, default=dict)  # never raw source text
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Reimport(Base):
+    """An edited Word draft brought back into the application, compared clause by clause with its base version."""
+    __tablename__ = "reimport"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("policy_document.id", ondelete="CASCADE"), index=True)
+    base_version: Mapped[int] = mapped_column(Integer)
+    language: Mapped[str] = mapped_column(String(5))
+    filename: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | applied | discarded
+    changes: Mapped[list] = mapped_column(JSON, default=list)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    applied_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

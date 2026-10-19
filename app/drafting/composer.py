@@ -176,7 +176,8 @@ class Resolver:
         return self.levels()[-1]
 
     def parent_title(self):
-        return CAT["EISP"]["title"][self.lang]
+        parent = CAT[self._code]["parent"] if self._code in CAT else "EISP"
+        return CAT[parent or "EISP"]["title"][self.lang]
 
     def exc_ref(self):
         if "RISK" in self.ctx.selected:
@@ -287,7 +288,7 @@ def placeholders(text: str) -> list[dict]:
 
 def policy_number(prefix: str, code: str) -> str:
     c = CAT[code]
-    kind = "EISP" if code == "EISP" else ("POL" if c["level"] <= 2 else "STD")
+    kind = "EISP" if code == "EISP" else {3: "STD", 4: "PRC"}.get(c["level"], "POL")
     return f"{prefix}-{kind}-001" if code == "EISP" else f"{prefix}-{kind}-{c['abbr']}-001"
 
 
@@ -356,6 +357,19 @@ def compose(code: str, ctx: Context) -> dict:
                 if all(p.answered(i) for i in ins) and ins:
                     source_type = "company_fact" if cl["src"] == "answer" else "organization_decision"
                     review = "user_confirmed" if cl["src"] == "answer" else "decision_recorded"
+            extra = {}
+            if cl.get("table"):
+                tcols = cl["table"]["cols"][lang]
+                trows = []
+                for row in cl["table"]["rows"][lang]:
+                    cells = []
+                    for cell in row:
+                        ctext, cused = r.resolve(cell, code)
+                        ctx.inputs_used.update(cused)
+                        cells.append(ctext)
+                    trows.append(cells)
+                extra = {"table": trows, "table_cols": tcols, "table_intro": text}
+                text = text + " — " + " | ".join("; ".join(rw) for rw in trows)
             phs = placeholders(text)
             if phs and review in ("user_confirmed", "decision_recorded"):
                 review = "needs_owner_confirmation"
@@ -383,7 +397,7 @@ def compose(code: str, ctx: Context) -> dict:
                                                    "Sélectionnez cette politique ou modifiez la clause pour renvoyer au document qui couvre le sujet.")})
             clauses_out.append({"clause_id": cid, "text": text, "modality": cl["modality"], "source_type": source_type,
                                 "source_ids": sorted(set(srcids)), "framework_refs": list(cl.get("refs", [])),
-                                "review_status": review, "legal_review": bool(cl.get("legal")), "placeholders": phs})
+                                "review_status": review, "legal_review": bool(cl.get("legal")), "placeholders": phs, **extra})
         if not clauses_out:
             continue
         sec_no += 1
@@ -395,7 +409,7 @@ def compose(code: str, ctx: Context) -> dict:
     body = {
         "schema": "pb-policy/1",
         "policy_code": code, "policy_id": pid, "title": cat["title"][lang], "language": lang,
-        "policy_type": "enterprise_policy" if code == "EISP" else "topic_policy",
+        "policy_type": {1: "enterprise_policy", 2: "topic_policy", 3: "standard", 4: "procedure"}.get(cat["level"], "topic_policy"),
         "level": cat["level"], "level_label": LEVELS[cat["level"]][lang],
         "template": cat["template"],
         "parent_policy_id": policy_number(p.doc_prefix, parent) if parent else None,
@@ -451,7 +465,36 @@ def _dynamic(kind: str, code: str, ctx: Context, r: Resolver):
             d = (desc_fr if lang == "fr" else desc_en)[idx]
             rows.append(f"{lv}: {d}")
         text = T(lang, "Level definitions — ", "Définition des niveaux — ") + " ".join(f"({i + 1}) {row}" for i, row in enumerate(rows))
-        return text, "framework_recommendation", ["DATA-02B"], {"table": [[lv, rows[i].split(': ', 1)[1]] for i, lv in enumerate(levels)]}
+        return text, "framework_recommendation", ["DATA-02B"], {
+            "table": [[lv, rows[i].split(': ', 1)[1]] for i, lv in enumerate(levels)],
+            "table_cols": T(lang, "Level|Definition", "Niveau|Définition").split("|"),
+            "table_intro": T(lang, "Level definitions", "Définition des niveaux")}
+    if kind == "handling_matrix":
+        levels = r.levels()
+        n = len(levels)
+        M = {"en": [
+            ["No label required", "Any approved system", "No restriction", "May be published", "Normal recycling"],
+            ["Optional “Internal” label", "{org} systems and approved cloud services", "Internal channels; encrypted (TLS) over public networks", "To third parties under an agreement or with a business need", "Normal disposal; wipe devices"],
+            ["“Confidential” label on documents and messages", "Approved locations only; encrypted on portable devices and removable media", "Encrypted; verify recipients; secure link with expiry for external sharing", "Only with the owner’s authorization and a confidentiality obligation", "Cross-cut shredding; sanitize or destroy media"],
+            ["“" + levels[-1] + "” label on every page and message", "Systems approved by {sec} for this level; access logged", "End-to-end encryption; no personal email or messaging", "Only with the owner’s prior written approval, recorded", "Certified destruction with a record"]],
+            "fr": [
+            ["Aucune mention requise", "Tout système approuvé", "Aucune restriction", "Peut être publiée", "Recyclage normal"],
+            ["Mention « Interne » facultative", "Systèmes de {org} et services infonuagiques approuvés", "Canaux internes; chiffrée (TLS) sur les réseaux publics", "À des tiers en vertu d’une entente ou d’un besoin d’affaires", "Élimination normale; effacement des appareils"],
+            ["Mention « Confidentiel » sur les documents et messages", "Emplacements approuvés seulement; chiffrée sur appareils portables et supports amovibles", "Chiffrée; vérifier les destinataires; lien sécurisé avec échéance pour le partage externe", "Seulement avec l’autorisation du responsable et une obligation de confidentialité", "Déchiquetage en particules; assainissement ou destruction des supports"],
+            ["Mention « " + levels[-1] + " » sur chaque page et message", "Systèmes approuvés par {sec} pour ce niveau; accès journalisé", "Chiffrement de bout en bout; aucune messagerie personnelle", "Seulement avec l’approbation écrite préalable du responsable, consignée", "Destruction certifiée avec preuve"]]}[lang]
+        rows = []
+        for i, lv in enumerate(levels):
+            idx = round(i * 3 / (n - 1)) if n > 1 else 0
+            cells = []
+            for cell in M[idx]:
+                t_, _u = r.resolve(cell, code)
+                cells.append(t_)
+            rows.append([lv] + cells)
+        cols = T(lang, "Level|Labelling|Storage|Transmission|Sharing|Disposal",
+                 "Niveau|Mention|Stockage|Transmission|Partage|Élimination").split("|")
+        intro = T(lang, "Minimum handling rules by classification level", "Règles minimales de manipulation par niveau de classification")
+        text = intro + " — " + " | ".join("; ".join(rw) for rw in rows)
+        return text, "framework_recommendation", ["DATA-02B"], {"table": rows, "table_cols": cols, "table_intro": intro}
     return None
 
 

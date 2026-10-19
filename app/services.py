@@ -160,9 +160,25 @@ def ingest(db: Session, ctx: Ctx, project: Project, filename: str, data: bytes, 
     path = folder / f"{doc.id}.bin"
     path.write_bytes(encrypt(data))
     doc.blob_path = str(path)
+    doc.ocr_pages = ex.ocr_pages
+    if ex.needs_ocr and not ex.segments:
+        doc.ingestion_state = "needs_ocr"
+    ai_meta = _store_segments(db, project, doc, ex.segments, start=0)
+    db.flush()
+    recompute_conflicts(db, project)
+    advance(project, "EVIDENCE_REVIEW")
+    audit(db, ctx, "source.uploaded", "source", doc.id, project.id, filename=name, sha256=sha, size=len(data),
+          segments=len(ex.segments), injection_flags=sum(1 for x in ex.segments if x.injection),
+          ocr_pages=len(ex.ocr_pages), ai_extraction=ai_meta is not None, ai_meta=ai_meta)
+    return doc
+
+
+def _store_segments(db: Session, project: Project, doc: SourceDocument, segments, start: int, ocr: bool = False):
+    """Encrypt and store segments, then propose facts (rules, plus AI only when the project allows it)."""
     allow_ai = project.ai_on_sources and config.settings.ai_available
     ai_meta = None
-    for i, seg in enumerate(ex.segments):
+    lower = {"high": "medium", "medium": "low", "low": "low"}
+    for i, seg in enumerate(segments, start):
         es = EvidenceSegment(workspace_id=project.workspace_id, project_id=project.id, source_id=doc.id, ordinal=i,
                              locator=seg.locator[:200], text_enc=encrypt(seg.text.encode()), injection_flag=seg.injection)
         db.add(es)
@@ -180,15 +196,61 @@ def ingest(db: Session, ctx: Ctx, project: Project, filename: str, data: bytes, 
         for f in facts:
             db.add(OrganizationFact(workspace_id=project.workspace_id, project_id=project.id, source_id=doc.id,
                                     segment_id=es.id, fact_type=f["fact_type"], label=f["label"], value=f["value"],
-                                    quote=f["quote"], locator=seg.locator[:200], confidence=f["confidence"],
-                                    extractor=f.get("extractor", "rules-v1")))
+                                    quote=f["quote"], locator=seg.locator[:200],
+                                    confidence=lower[f["confidence"]] if ocr else f["confidence"],
+                                    extractor=f.get("extractor", "rules-v1") + ("+ocr" if ocr else "")))
+    return ai_meta
+
+
+def run_ocr(db: Session, ctx: Ctx, project: Project, doc: SourceDocument) -> dict:
+    """OCR the pages of a scanned document that have no text. Runs locally; requested explicitly per document."""
+    from pathlib import Path
+    from app.ingestion import ocr
+    from app.ingestion.extract import INJ_RE, Segment
+    if not doc.ocr_pages:
+        raise HTTPException(409, "This document has no pages that need text recognition.")
+    info = ocr.engine_info()
+    if not info["available"]:
+        raise HTTPException(503, "No OCR engine is installed on this computer. Install Tesseract (macOS: brew install tesseract tesseract-lang) or run: pip install rapidocr-onnxruntime")
+    data = decrypt(Path(doc.blob_path).read_bytes())
+    kind = "pdf" if data.startswith(b"%PDF-") else "image"
+    try:
+        pages = ocr.ocr_document(data, kind, doc.ocr_pages)
+    except ocr.OCRUnavailable as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(422, f"Text recognition failed ({type(e).__name__}).")
+    segs = []
+    low = []
+    for pg in pages:
+        if not pg.text:
+            low.append(pg.page)
+            continue
+        if pg.confidence < 60:
+            low.append(pg.page)
+        prefix = "p." if kind == "pdf" else "image"
+        paras = [x.strip() for x in pg.text.split("\n\n") if x.strip()]
+        from app.ingestion.extract import _chunk
+        for sg in _chunk(f"{prefix} {pg.page} (OCR {pg.confidence:.0f}%)", paras):
+            sg.injection = bool(INJ_RE.search(sg.text))
+            segs.append(sg)
+    existing = len(db.scalars(select(EvidenceSegment.id).where(EvidenceSegment.source_id == doc.id)).all())
+    _store_segments(db, project, doc, segs, start=existing, ocr=True)
+    mean = round(sum(p.confidence for p in pages) / len(pages), 1) if pages else 0
+    doc.ocr_meta = {"engine": info["engine"], "languages": info["languages"], "pages": [p.page for p in pages],
+                    "mean_confidence": mean, "low_confidence_pages": low}
+    doc.ocr_pages = []
+    doc.ingestion_state = "extracted"
+    warn = [w for w in (doc.warnings or []) if "OCR" not in w]
+    warn.append(f"Text obtained by OCR ({info['engine']}, average confidence {mean:.0f}%). Check quotes against the original before confirming facts."
+                + (f" Low-confidence pages: {', '.join(map(str, low))}." if low else ""))
+    if any(sg.injection for sg in segs):
+        warn.append("Recognized text contains passages that read like instructions to an AI system; they are treated as content only.")
+    doc.warnings = warn
     db.flush()
     recompute_conflicts(db, project)
-    advance(project, "EVIDENCE_REVIEW")
-    audit(db, ctx, "source.uploaded", "source", doc.id, project.id, filename=name, sha256=sha, size=len(data),
-          segments=len(ex.segments), injection_flags=sum(1 for x in ex.segments if x.injection),
-          ai_extraction=bool(allow_ai), ai_meta=ai_meta)
-    return doc
+    audit(db, ctx, "source.ocr", "source", doc.id, project.id, engine=info["engine"], pages=len(pages), mean_confidence=mean)
+    return {"pages": len(pages), "segments": len(segs), "mean_confidence": mean, "low_confidence_pages": low}
 
 
 def recompute_conflicts(db: Session, project: Project) -> None:
@@ -367,8 +429,15 @@ def selected_codes(db: Session, project: Project) -> list[str]:
 def decisions_view(db: Session, project: Project, lang: str) -> list[dict]:
     p = load_profile(db, project, lang)
     out = []
+    from app.drafting.library import referenced_decisions
+    shown: set[str] = set()
     for code in selected_codes(db, project):
-        items = [_qview(d, p.answers.get(d["code"]), lang) for d in DECISIONS_BY_POLICY.get(code, []) if decision_applies(d, p)]
+        own = [d for d in DECISIONS_BY_POLICY.get(code, []) if decision_applies(d, p)]
+        # decisions a standard or procedure depends on but that belong to a policy not selected
+        borrowed = [DEC_BY[c] for c in referenced_decisions(code) if c in DEC_BY and DEC_BY[c] not in own
+                    and DEC_BY[c]["policy"] not in selected_codes(db, project) and decision_applies(DEC_BY[c], p)]
+        items = [_qview(d, p.answers.get(d["code"]), lang) for d in own + borrowed if d["code"] not in shown]
+        shown.update(i["code"] for i in items)
         if items:
             out.append({"policy": code, "title": CAT[code]["title"][lang], "questions": items})
     return out
@@ -498,11 +567,29 @@ def edit_clause(db: Session, ctx: Ctx, project: Project, doc: PolicyDocument, cl
                 found = True
     if not found:
         raise HTTPException(404, "Clause not found.")
-    # rebuild placeholder inventory for the edited clause
-    body["open_decisions"] = [d for d in body["open_decisions"] if d.get("clause_id") != clause_id]
-    for ph in placeholders(text):
-        body["open_decisions"].append({"id": f"OD-{clause_id}-e", "type": ph["type"], "severity": "high" if ph["type"] in ("DECISION", "ROLE", "APPROVER") else "medium",
-                                       "clause_id": clause_id, "text": ph["text"]})
+    _reinventory(body, [clause_id])
+    save_edited_version(db, ctx, project, doc, lang, body, [clause_id], "clause.edit")
+    return current_body(db, doc, lang)
+
+
+def _reinventory(body: dict, clause_ids: list[str]) -> None:
+    """Rebuild the open-decision inventory for edited, added or deleted clauses."""
+    present = {c["clause_id"]: c for s in body["sections"] for c in s["clauses"]}
+    body["open_decisions"] = [d for d in body["open_decisions"] if d.get("clause_id") not in clause_ids
+                              and (d.get("clause_id") in present or d.get("type") == "SOURCE")]
+    for cid in clause_ids:
+        c = present.get(cid)
+        if not c:
+            continue
+        for k, ph in enumerate(placeholders(c["text"]), 1):
+            body["open_decisions"].append({"id": f"OD-{cid}-e{k}", "type": ph["type"],
+                                           "severity": "high" if ph["type"] in ("DECISION", "ROLE", "APPROVER") else "medium",
+                                           "clause_id": cid, "text": ph["text"]})
+
+
+def save_edited_version(db: Session, ctx: Ctx, project: Project, doc: PolicyDocument, lang: str, body: dict,
+                        changed: list[str], action: str, **audit_details) -> int:
+    """Store a user-edited body as a new version; carry other languages forward and ask for their review."""
     new_no = doc.current_version + 1
     body["version"] = f"0.{new_no}"
     body["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -511,20 +598,22 @@ def edit_clause(db: Session, ctx: Ctx, project: Project, doc: PolicyDocument, cl
         b = body if o.language == lang else dict(o.body, version=f"0.{new_no}")
         nv = PolicyVersion(workspace_id=o.workspace_id, project_id=o.project_id, document_id=doc.id, version_no=new_no,
                            language=o.language, body=b, inputs_used=o.inputs_used,
-                           generator=dict(o.generator, edited_by=ctx.user.id), created_by=ctx.user.id)
+                           generator=dict(o.generator, edited_by=ctx.user.id, edit_action=action), created_by=ctx.user.id)
         db.add(nv)
         db.flush()
         _store_clauses(db, nv, b)
         if o.language != lang:
-            db.add(Issue(workspace_id=project.workspace_id, project_id=project.id, document_id=doc.id, version_id=nv.id,
-                         clause_id=clause_id, kind="translation_review", severity="medium",
-                         message=f"Clause {clause_id} was edited in {lang.upper()}; review the {o.language.upper()} version for equivalence.",
-                         message_fr=f"La clause {clause_id} a été modifiée en {lang.upper()}; vérifiez l’équivalence de la version {o.language.upper()}."))
+            for clause_id in changed:
+                db.add(Issue(workspace_id=project.workspace_id, project_id=project.id, document_id=doc.id, version_id=nv.id,
+                             clause_id=clause_id, kind="translation_review", severity="medium",
+                             message=f"Clause {clause_id} was changed in {lang.upper()}; review the {o.language.upper()} version for equivalence.",
+                             message_fr=f"La clause {clause_id} a été modifiée en {lang.upper()}; vérifiez l’équivalence de la version {o.language.upper()}."))
     doc.current_version = new_no
-    audit(db, ctx, "clause.edit", "clause", clause_id, project.id, document=doc.policy_code, version=new_no, language=lang)
+    audit(db, ctx, action, "policy", doc.id, project.id, document=doc.policy_code, version=new_no, language=lang,
+          clauses=changed[:200], **audit_details)
     db.flush()
     run_quality(db, project)
-    return current_body(db, doc, lang)
+    return new_no
 
 
 # ------------------------------------------------------------------ quality checks
@@ -592,11 +681,14 @@ def run_quality(db: Session, project: Project) -> list[Issue]:
         add("legal_review", "medium",
             "Clauses flagged for legal review (privacy, monitoring, retention, sanctions or notification) in: " + ", ".join(legal) + ".",
             "Clauses à soumettre à une révision juridique (vie privée, surveillance, conservation, sanctions ou notification) dans : " + ", ".join(legal) + ".")
-    if "EISP" not in selected and selected:
-        add("missing_parent", "medium", "Topic policies refer to the Enterprise Information Security Policy, which is not selected.",
-            "Les politiques thématiques renvoient à la Politique de sécurité de l’information de l’entreprise, qui n’est pas sélectionnée.",
-            sugg_en="Select it, or replace the references with the document that plays that role.",
-            sugg_fr="Sélectionnez-la ou remplacez les renvois par le document qui joue ce rôle.")
+    orphans = [c for c in selected if CAT[c]["parent"] and CAT[c]["parent"] not in selected]
+    if orphans:
+        parents = sorted({CAT[c]["parent"] for c in orphans}, key=list(CAT).index)
+        add("missing_parent", "medium",
+            "These documents refer to a parent document that is not selected: " + ", ".join(f"{c} → {CAT[CAT[c]['parent']]['title']['en']}" for c in orphans) + ".",
+            "Ces documents renvoient à un document parent qui n’est pas sélectionné : " + ", ".join(f"{c} → {CAT[CAT[c]['parent']]['title']['fr']}" for c in orphans) + ".",
+            sugg_en="Select " + ", ".join(CAT[x]["title"]["en"] for x in parents) + ", or replace the references with the document that plays that role.",
+            sugg_fr="Sélectionnez " + ", ".join(CAT[x]["title"]["fr"] for x in parents) + ", ou remplacez les renvois par le document qui joue ce rôle.")
     if len({o.lower() for o in owners}) > 2:
         add("role_inconsistency", "low", f"Different owner names are used across documents: {', '.join(sorted(owners))}.",
             f"Des noms de responsables différents sont utilisés dans les documents : {', '.join(sorted(owners))}.")
@@ -646,3 +738,77 @@ def profile_view(db: Session, project: Project, lang: str) -> dict:
             groups.append({"section": sec, "title": title[lang], "items": items})
     return {"groups": groups, "observations": governance_observations(p, lang), "progress": progress(p, project.mode),
             "doc_prefix": p.doc_prefix, "org_name": p.org_name}
+
+
+# ------------------------------------------------------------------ Word re-import
+def create_reimport(db: Session, ctx: Ctx, project: Project, filename: str, data: bytes):
+    from app.export import reimport as RI
+    from app.models import Reimport
+    if len(data) > config.settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, "File too large.")
+    try:
+        parsed = RI.parse(data, sanitize_filename(filename))
+    except RI.ReimportError as e:
+        raise HTTPException(422, str(e))
+    doc = db.get(PolicyDocument, parsed.document_uuid)
+    if not doc or doc.workspace_id != ctx.workspace_id or doc.project_id != project.id:
+        raise HTTPException(422, "This Word file was not exported from this project.")
+    lang = parsed.language or "en"
+    base_no = parsed.version_no or doc.current_version
+    base = db.scalar(select(PolicyVersion).where(PolicyVersion.document_id == doc.id, PolicyVersion.version_no == base_no,
+                                                 PolicyVersion.language == lang))
+    if not base:
+        raise HTTPException(422, "The version this file was exported from no longer exists in the project.")
+    changes, warnings = RI.compare(base.body, parsed)
+    if base_no != doc.current_version:
+        warnings.append(f"This file was exported from version 0.{base_no}; the project is now at version 0.{doc.current_version}. "
+                        "Accepted changes will be applied on top of the current version.")
+    ri = Reimport(workspace_id=project.workspace_id, project_id=project.id, document_id=doc.id, base_version=base_no,
+                  language=lang, filename=sanitize_filename(filename), sha256=hashlib.sha256(data).hexdigest(),
+                  changes=changes, warnings=warnings, created_by=ctx.user.id)
+    db.add(ri)
+    db.flush()
+    audit(db, ctx, "reimport.create", "reimport", ri.id, project.id, document=doc.policy_code, base_version=base_no,
+          language=lang, changes=len(changes), sha256=ri.sha256)
+    return ri
+
+
+def reimport_view(db: Session, ri) -> dict:
+    doc = db.get(PolicyDocument, ri.document_id)
+    return {"id": ri.id, "document_id": ri.document_id, "policy_id": doc.policy_id, "policy_code": doc.policy_code,
+            "title": CAT[doc.policy_code]["title"][ri.language], "base_version": ri.base_version,
+            "current_version": doc.current_version, "language": ri.language, "filename": ri.filename, "status": ri.status,
+            "changes": ri.changes, "warnings": ri.warnings, "applied_version": ri.applied_version,
+            "created_at": ri.created_at.isoformat()}
+
+
+def decide_reimport(db: Session, ctx: Ctx, ri, decisions: dict[str, str]) -> None:
+    if ri.status != "pending":
+        raise HTTPException(409, "This re-import was already applied or discarded.")
+    changes = json.loads(json.dumps(ri.changes))
+    for ch in changes:
+        d = decisions.get(ch["key"])
+        if d in ("accept", "reject", "pending"):
+            ch["decision"] = d
+    ri.changes = changes
+
+
+def apply_reimport(db: Session, ctx: Ctx, project: Project, ri) -> int:
+    from app.export import reimport as RI
+    if ri.status != "pending":
+        raise HTTPException(409, "This re-import was already applied or discarded.")
+    accepted = [c for c in ri.changes if c["decision"] == "accept"]
+    if not accepted:
+        raise HTTPException(422, "Accept at least one change, or discard the re-import.")
+    doc = db.get(PolicyDocument, ri.document_id)
+    cur = db.scalar(select(PolicyVersion).where(PolicyVersion.document_id == doc.id, PolicyVersion.version_no == doc.current_version,
+                                                PolicyVersion.language == ri.language))
+    if not cur:
+        raise HTTPException(409, "No current draft in this language.")
+    changes = json.loads(json.dumps(ri.changes))
+    body, changed = RI.apply_changes(cur.body, changes, doc.policy_code)
+    _reinventory(body, changed)
+    new_no = save_edited_version(db, ctx, project, doc, ri.language, body, changed, "reimport.apply",
+                                 reimport=ri.id, accepted=len(accepted), rejected=sum(1 for c in changes if c["decision"] == "reject"))
+    ri.changes, ri.status, ri.applied_version = changes, "applied", new_no
+    return new_no

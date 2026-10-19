@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "CyberRiskGuardian Policy Builder"
-APP_VERSION = "0.1.0-beta"
+APP_VERSION = "0.2.0-beta"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 

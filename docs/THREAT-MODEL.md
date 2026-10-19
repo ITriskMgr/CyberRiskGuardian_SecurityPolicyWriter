@@ -1,4 +1,4 @@
-# Threat model (beta 0.1.0)
+# Threat model (beta 0.2.0)
 
 Scope: a single-computer deployment (server bound to 127.0.0.1) used by one organization or a consultant with
 several workspaces. Assets: organization answers, uploaded documents (often confidential), drafts, exports,
@@ -19,3 +19,5 @@ the Anthropic API key.
 | Export of an outdated draft as approved | Exports always say DRAFT; stale drafts are flagged; version and generation time are in the document. | — |
 | Generation denial of service | Synchronous jobs, upload and row limits, AI token and timeout limits. | Add rate limits before any multi-user network exposure. |
 | Inconsistent translations | EN and FR share clause IDs; editing one language opens a translation-review finding for the other. | Legal equivalence of translations is never assumed. |
+| OCR of hostile images | Image type sniffed from content; Pillow decompression-bomb limit (60 megapixels) and 100-page cap; OCR runs locally only after the user asks, per document; recognized text goes through the same injection flagging. | OCR errors can change meaning — facts from OCR get lower confidence and the page confidence is shown. |
+| Forged or foreign Word re-imports | The file must carry a document ID that belongs to the caller’s project (tenant-scoped), must pass the same Office safety checks as uploads, and changes are only proposals until a person accepts them; applying creates a new version. | A user who edits hidden bookmarks can mis-attach text to another clause — every change is shown before it is accepted. |

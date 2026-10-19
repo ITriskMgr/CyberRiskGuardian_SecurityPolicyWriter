@@ -42,7 +42,7 @@ L = {
            "class_cols": ["Level", "Definition"], "lang_name": "English",
            "basis": {"framework_recommendation": "Good-practice recommendation — owner to confirm", "company_fact": "Company answer",
                      "organization_decision": "Organization decision", "open_decision": "Open decision",
-                     "confirmed_obligation": "Confirmed obligation", "user_edited": "Edited by user"},
+                     "confirmed_obligation": "Confirmed obligation", "user_edited": "Edited by user", "user_added": "Added by user"},
            "review": {"needs_owner_confirmation": "Owner confirmation needed", "user_confirmed": "Confirmed by user",
                       "decision_recorded": "Decision recorded", "decision_required": "Decision required",
                       "legal_review_required": "Legal review required", "edited_by_user": "Edited — review"},
@@ -65,7 +65,7 @@ L = {
            "class_cols": ["Niveau", "Définition"], "lang_name": "Français",
            "basis": {"framework_recommendation": "Bonne pratique recommandée — à confirmer", "company_fact": "Réponse de l’organisation",
                      "organization_decision": "Décision de l’organisation", "open_decision": "Décision ouverte",
-                     "confirmed_obligation": "Obligation confirmée", "user_edited": "Modifiée par l’utilisateur"},
+                     "confirmed_obligation": "Obligation confirmée", "user_edited": "Modifiée par l’utilisateur", "user_added": "Ajoutée par l’utilisateur"},
            "review": {"needs_owner_confirmation": "Confirmation du responsable requise", "user_confirmed": "Confirmée par l’utilisateur",
                       "decision_recorded": "Décision consignée", "decision_required": "Décision requise",
                       "legal_review_required": "Révision juridique requise", "edited_by_user": "Modifiée — à réviser"},
@@ -99,6 +99,28 @@ def _field(paragraph, instr: str, placeholder: str = "") -> None:
     e = OxmlElement("w:fldChar"); e.set(qn("w:fldCharType"), "end")
     for el in (b, i, s, t, e):
         run._r.append(el)
+
+
+_BM_ID = [0]
+BOOKMARK_PREFIX = "_pb_"
+
+
+def bookmark_name(clause_id: str) -> str:
+    """Hidden Word bookmark (leading underscore) carrying the stable clause ID; survives normal editing."""
+    return (BOOKMARK_PREFIX + clause_id.replace("-", "_"))[:40]
+
+
+def _bookmark(paragraph, clause_id: str) -> None:
+    _BM_ID[0] += 1
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), str(_BM_ID[0]))
+    start.set(qn("w:name"), bookmark_name(clause_id))
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), str(_BM_ID[0]))
+    p = paragraph._p
+    ppr = p.find(qn("w:pPr"))
+    p.insert(1 if ppr is not None else 0, start)
+    p.append(end)
 
 
 def _repeat_header(row) -> None:
@@ -295,9 +317,18 @@ def render_policy(body: dict, meta: dict | None = None) -> bytes:
         for c in s["clauses"]:
             if c.get("table"):
                 intro = doc.add_paragraph()
-                rn = intro.add_run(f"{c['number']}  "); rn.bold = True
-                intro.add_run(c["text"].split(" — ")[0] if " — " in c["text"] else "")
-                _table(doc, lab["class_cols"], c["table"], [3.6, 12.9])
+                pf = intro.paragraph_format
+                pf.left_indent, pf.first_line_indent = Cm(1.1), Cm(-1.1)
+                pf.tab_stops.add_tab_stop(Cm(1.1))
+                pf.keep_with_next = True
+                rn = intro.add_run(f"{c['number']}\t"); rn.bold = True; rn.font.color.rgb = ACCENT
+                _text_with_placeholders(intro, c.get("table_intro") or c["text"].split(" — ")[0])
+                _bookmark(intro, c["clause_id"])
+                cols = c.get("table_cols") or lab["class_cols"]
+                total = 16.5
+                first = 3.6 if len(cols) > 2 else 3.6
+                widths = [first] + [(total - first) / (len(cols) - 1)] * (len(cols) - 1)
+                _table(doc, cols, c["table"], widths, font_pt=8.5 if len(cols) > 3 else 9)
                 doc.add_paragraph()
                 continue
             para = doc.add_paragraph()
@@ -307,6 +338,7 @@ def render_policy(body: dict, meta: dict | None = None) -> bytes:
             rn = para.add_run(f"{c['number']}\t"); rn.bold = True; rn.font.color.rgb = ACCENT
             pf.tab_stops.add_tab_stop(Cm(1.1))
             _text_with_placeholders(para, c["text"])
+            _bookmark(para, c["clause_id"])
 
     # Appendix A — open decisions
     doc.add_page_break()

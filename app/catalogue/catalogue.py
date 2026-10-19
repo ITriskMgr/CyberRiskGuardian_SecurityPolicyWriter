@@ -16,7 +16,8 @@ WEIGHTS = {"applicability": 0.25, "risk": 0.25, "maturity_gap": 0.15, "dependenc
 LEVELS = {0: {"en": "Governance framework", "fr": "Cadre de gouvernance"},
           1: {"en": "Enterprise policy", "fr": "Politique d’entreprise"},
           2: {"en": "Topic-specific policy", "fr": "Politique thématique"},
-          3: {"en": "Standard", "fr": "Norme"}}
+          3: {"en": "Standard", "fr": "Norme"},
+          4: {"en": "Procedure", "fr": "Procédure"}}
 
 DOMAINS = {
     "governance": {"en": "Enterprise governance", "fr": "Gouvernance d’entreprise"},
@@ -112,6 +113,39 @@ CATALOGUE: list[dict] = [
     {"code": "TRAIN", "abbr": "SAT", "level": 2, "domain": "people", "parent": "EISP", "template": "structure",
      "title": _t("Security Awareness and Training Policy", "Politique de sensibilisation et de formation à la sécurité"),
      "summary": _t("Role-based training, frequency and effectiveness measures.", "Formation selon le rôle, fréquence et mesure de l’efficacité.")},
+    # ---------------------------------------------------------------- level 3: standards
+    {"code": "STD-AUTH", "abbr": "AUTH", "level": 3, "domain": "identity", "parent": "IAM", "template": "full",
+     "title": _t("Authentication and Password Standard", "Norme d’authentification et de mots de passe"),
+     "summary": _t("Password length, compromised-password blocking, lockout, screen lock, MFA factors, service-account secrets.",
+                   "Longueur des mots de passe, blocage des mots de passe compromis, verrouillage, écran de veille, facteurs d’AMF, secrets des comptes de service.")},
+    {"code": "STD-HANDLING", "abbr": "HDL", "level": 3, "domain": "information", "parent": "CLASS", "template": "full",
+     "title": _t("Information Handling Standard", "Norme de manipulation de l’information"),
+     "summary": _t("Handling matrix per classification level: labelling, storage, transmission, sharing, disposal.",
+                   "Matrice de manipulation par niveau de classification : mention, stockage, transmission, partage, élimination.")},
+    {"code": "STD-CRYPTO", "abbr": "CRY", "level": 3, "domain": "information", "parent": "CLASS", "template": "full",
+     "title": _t("Cryptography Standard", "Norme de cryptographie"),
+     "summary": _t("Approved protocols and algorithms, encryption at rest and in transit, keys and certificates.",
+                   "Protocoles et algorithmes approuvés, chiffrement au repos et en transit, clés et certificats.")},
+    {"code": "STD-LOG", "abbr": "LOG", "level": 3, "domain": "operations", "parent": "LOG", "template": "full",
+     "title": _t("Logging Standard", "Norme de journalisation"),
+     "summary": _t("Log sources, events, retention, time synchronization, review frequency and access to logs.",
+                   "Sources et événements journalisés, conservation, synchronisation de l’heure, fréquence de revue et accès aux journaux.")},
+    # ---------------------------------------------------------------- level 4: procedures
+    {"code": "PRC-IR", "abbr": "IR", "level": 4, "domain": "resilience", "parent": "IR", "template": "full",
+     "title": _t("Security Incident Response Procedure", "Procédure d’intervention en cas d’incident de sécurité"),
+     "summary": _t("Step by step: report, triage, severity, containment, evidence, notification assessment, recovery, review.",
+                   "Étape par étape : signalement, triage, gravité, confinement, preuve, évaluation des notifications, rétablissement, revue.")},
+    {"code": "PRC-JML", "abbr": "JML", "level": 4, "domain": "identity", "parent": "IAM", "template": "full",
+     "title": _t("Access Provisioning and Revocation Procedure", "Procédure d’attribution et de révocation des accès"),
+     "summary": _t("Joiners, movers, leavers and periodic access reviews.", "Arrivées, mouvements, départs et revues périodiques des accès.")},
+    {"code": "PRC-EXC", "abbr": "EXC", "level": 4, "domain": "governance", "parent": "RISK", "template": "full",
+     "title": _t("Exception Request and Approval Procedure", "Procédure de demande et d’approbation des dérogations"),
+     "summary": _t("How to request, assess, approve, record, renew and close a security exception.",
+                   "Comment demander, évaluer, approuver, consigner, renouveler et clore une dérogation de sécurité.")},
+    {"code": "PRC-RESTORE", "abbr": "RST", "level": 4, "domain": "resilience", "parent": "BACKUP", "template": "full",
+     "title": _t("Backup Restoration Test Procedure", "Procédure de test de restauration des sauvegardes"),
+     "summary": _t("Planning, performing, verifying and recording restoration tests.",
+                   "Planifier, effectuer, vérifier et consigner les tests de restauration.")},
 ]
 
 BY_CODE = {c["code"]: c for c in CATALOGUE}
@@ -248,6 +282,54 @@ DECISIONS: list[dict] = [
       [o("brokered", "Only through a monitored, brokered connection enabled on request", "Seulement par une connexion intermédiée et surveillée, activée sur demande"),
        o("none", "Not permitted", "Interdit")], "brokered",
       "Vendor access is a frequent OT entry point.", "L’accès des fournisseurs est un point d’entrée fréquent en TO."),
+]
+
+DECISIONS += [
+    d("DEC-AUTH-MINLEN", "STD-AUTH", "Minimum password length", "Longueur minimale des mots de passe",
+      [o("15_8", "15 characters, or 8 when multi-factor authentication protects the account",
+         "15 caractères, ou 8 lorsque l’authentification multifacteur protège le compte"),
+       o("12", "12 characters for all accounts", "12 caractères pour tous les comptes"),
+       o("14", "14 characters for all accounts", "14 caractères pour tous les comptes")], "15_8",
+      "Length matters more than complexity rules.", "La longueur compte davantage que les règles de complexité."),
+    d("DEC-AUTH-LOCKOUT", "STD-AUTH", "Failed sign-in attempts before an account is locked or throttled",
+      "Tentatives de connexion échouées avant le verrouillage ou le ralentissement d’un compte",
+      [o("5", "5 attempts", "5 tentatives"), o("10", "10 attempts", "10 tentatives")], "10",
+      "Balances guessing attacks against help-desk load.", "Équilibre entre attaques par devinette et charge du centre d’assistance."),
+    d("DEC-AUTH-SCREENLOCK", "STD-AUTH", "Automatic screen lock after inactivity", "Verrouillage automatique de l’écran après inactivité",
+      [o("5", "5 minutes", "5 minutes"), o("10", "10 minutes", "10 minutes"), o("15", "15 minutes", "15 minutes")], "10",
+      "Shorter in public-facing or clinical areas.", "Plus court dans les aires publiques ou cliniques."),
+    d("DEC-AUTH-FACTORS", "STD-AUTH", "Accepted second factors", "Seconds facteurs acceptés",
+      [o("phishing_resistant_admin", "Authenticator app or security key; phishing-resistant keys or passkeys for administrators",
+         "Application d’authentification ou clé de sécurité; clés résistantes à l’hameçonnage ou clés d’accès pour les administrateurs"),
+       o("app_token", "Authenticator app or hardware token; SMS not accepted", "Application d’authentification ou jeton matériel; SMS non accepté"),
+       o("any", "Any, including SMS as a fallback", "Tout facteur, y compris le SMS en solution de repli")], "phishing_resistant_admin",
+      "SMS codes can be intercepted or redirected.", "Les codes par SMS peuvent être interceptés ou détournés."),
+    d("DEC-HDL-CLOUD", "STD-HANDLING", "Where may Confidential information be stored?", "Où l’information Confidentielle peut-elle être stockée?",
+      [o("approved_list", "Only in storage services on the list approved by the security lead", "Seulement dans les services de stockage figurant sur la liste approuvée par le responsable de la sécurité"),
+       o("tenant", "Only in the organization’s own collaboration tenant (e.g., its Microsoft 365 or Google Workspace)", "Seulement dans l’environnement de collaboration de l’organisation (p. ex. son Microsoft 365 ou Google Workspace)")],
+      "approved_list", "Prevents copies in personal or unmanaged cloud accounts.", "Évite les copies dans des comptes infonuagiques personnels ou non gérés."),
+    d("DEC-HDL-USB", "STD-HANDLING", "Removable media (USB keys, external drives)", "Supports amovibles (clés USB, disques externes)",
+      [o("encrypted_only", "Allowed only if encrypted and issued by the organization", "Permis seulement s’ils sont chiffrés et fournis par l’organisation"),
+       o("blocked", "Blocked, except by approved exception", "Bloqués, sauf dérogation approuvée")], "encrypted_only",
+      "A frequent source of loss and malware.", "Une source fréquente de pertes et de logiciels malveillants."),
+    d("DEC-CRY-TLS", "STD-CRYPTO", "Minimum TLS version for data in transit", "Version minimale de TLS pour les données en transit",
+      [o("1.2", "TLS 1.2, with TLS 1.3 preferred", "TLS 1.2, TLS 1.3 privilégié"), o("1.3", "TLS 1.3 only", "TLS 1.3 seulement")], "1.2",
+      "TLS 1.3 only may break older clients or partners.", "TLS 1.3 seulement peut exclure des clients ou partenaires plus anciens."),
+    d("DEC-CRY-KEYROT", "STD-CRYPTO", "Rotation of encryption keys you manage", "Renouvellement des clés de chiffrement gérées par l’organisation",
+      [o("annual", "At least annually and on suspected compromise", "Au moins annuellement et en cas de compromission soupçonnée"),
+       o("biennial", "At least every two years and on suspected compromise", "Au moins tous les deux ans et en cas de compromission soupçonnée")], "annual",
+      "Managed cloud key services can rotate automatically.", "Les services de clés infonuagiques gérés peuvent les renouveler automatiquement."),
+    d("DEC-LOG-REVIEW", "STD-LOG", "How are security logs reviewed?", "Comment les journaux de sécurité sont-ils revus?",
+      [o("alerts_daily", "Automated alerts triaged daily; full review weekly", "Alertes automatisées triées chaque jour; revue complète chaque semaine"),
+       o("weekly", "Manual review weekly", "Revue manuelle chaque semaine"),
+       o("mdr", "By the managed detection and response provider, continuously", "Par le fournisseur de détection et réponse gérées, en continu")], "alerts_daily",
+      "Logs no one reviews do not detect anything.", "Des journaux que personne ne consulte ne détectent rien."),
+    d("DEC-PIR-DAYS", "PRC-IR", "Post-incident review held within", "Revue post-incident tenue dans un délai de",
+      [o("5", "5 working days after closure", "5 jours ouvrables après la clôture"), o("10", "10 working days after closure", "10 jours ouvrables après la clôture")], "10",
+      "While memories are fresh.", "Pendant que les souvenirs sont frais."),
+    d("DEC-EXC-NOTICE", "PRC-EXC", "Reminder to the exception owner before expiry", "Rappel au responsable de la dérogation avant l’échéance",
+      [o("30", "30 days before expiry", "30 jours avant l’échéance"), o("14", "14 days before expiry", "14 jours avant l’échéance")], "30",
+      "Time to renew or remediate.", "Le temps de renouveler ou de corriger."),
 ]
 
 DECISIONS_BY_POLICY: dict[str, list[dict]] = {}
@@ -389,6 +471,27 @@ def recommend(p: Profile, lang: str = "en") -> list[dict]:
                     "parent": c["parent"], "template": c["template"], "recommended": rec, "score": score,
                     "priority": priority, "dimensions": scores, "reasons": reasons,
                     "decisions": [x["code"] for x in DECISIONS_BY_POLICY.get(c["code"], [])]})
+    T = (lambda en, fr: fr if lang == "fr" else en)
+    depth = p.value("DOC-02")
+    rec_by = {x["code"]: x["recommended"] for x in out}
+    for x in out:
+        if x["level"] < 3:
+            continue
+        parent_ok = rec_by.get(x["parent"], False)
+        wanted = depth == "complete" or (depth == "policies_standards" and x["level"] == 3)
+        x["recommended"] = bool(wanted and parent_ok)
+        ptitle = BY_CODE[x["parent"]]["title"][lang]
+        x["reasons"] = [T(f"Supports the {ptitle}; keeps its measurable parameters or steps out of the policy.",
+                          f"Appuie la {ptitle}; garde ses paramètres mesurables ou ses étapes hors de la politique.")]
+        if not depth or depth == "policies":
+            x["reasons"].append(T("Not recommended because the package depth is “policies only” or not chosen.",
+                                  "Non recommandée parce que la profondeur choisie est « politiques seulement » ou n’est pas choisie."))
+        elif x["level"] == 4 and depth == "policies_standards":
+            x["reasons"].append(T("Procedures are recommended when the package depth includes procedures.",
+                                  "Les procédures sont recommandées lorsque la profondeur choisie inclut les procédures."))
+        elif not parent_ok:
+            x["reasons"].append(T("Its parent policy is not recommended for this organization.",
+                                  "Sa politique parente n’est pas recommandée pour cette organisation."))
     out.sort(key=lambda x: (x["level"], -int(x["recommended"]), -x["score"]))
     return out
 

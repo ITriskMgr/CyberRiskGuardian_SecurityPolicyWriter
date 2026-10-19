@@ -16,7 +16,7 @@ MAX_ZIP_RATIO = 150
 MAX_ZIP_ENTRIES = 5000
 SEG_CHARS = 1500
 
-ALLOWED = {"docx", "pdf", "txt", "md", "csv", "xlsx"}
+ALLOWED = {"docx", "pdf", "txt", "md", "csv", "xlsx", "image"}
 
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above|earlier)\s+(instructions|prompts?|rules)",
@@ -49,11 +49,17 @@ class Extracted:
     doc_date: str = ""
     segments: list[Segment] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    ocr_pages: list[int] = field(default_factory=list)  # pages (1-based) with no selectable text
+
+    @property
+    def needs_ocr(self) -> bool:
+        return bool(self.ocr_pages)
 
 
 MIME = {"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "pdf": "application/pdf",
         "txt": "text/plain", "md": "text/markdown", "csv": "text/csv",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "image": "image/*"}
+IMAGE_MIME = {b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg", b"II*\x00": "image/tiff", b"MM\x00*": "image/tiff"}
 
 
 def sanitize_filename(name: str) -> str:
@@ -82,6 +88,8 @@ def sniff(data: bytes, filename: str) -> str:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if data.startswith(b"%PDF-"):
         return "pdf"
+    if any(data.startswith(m) for m in IMAGE_MIME):
+        return "image"
     if data.startswith(b"PK\x03\x04"):
         z = _check_zip(data)
         names = set(z.namelist())
@@ -165,6 +173,7 @@ def _docx(data: bytes, out: Extracted) -> None:
 def _pdf(data: bytes, out: Extracted) -> None:
     import pdfplumber
     empty = 0
+    empty_pages: list[int] = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         meta = pdf.metadata or {}
         out.title, out.author = str(meta.get("Title", "") or ""), str(meta.get("Author", "") or "")
@@ -174,13 +183,15 @@ def _pdf(data: bytes, out: Extracted) -> None:
             t = (page.extract_text() or "").strip()
             if not t:
                 empty += 1
+                empty_pages.append(i)
                 continue
             paras = [x.strip() for x in re.split(r"\n\s*\n|\n(?=[A-Z0-9][^\n]{0,80}\n)", t) if x.strip()]
             out.segments.extend(_chunk(f"p. {i}", paras))
+        out.ocr_pages = empty_pages
         if empty and not out.segments:
-            out.warnings.append("No selectable text: this looks like a scanned PDF. OCR is not available in this version.")
+            out.warnings.append("No selectable text: this looks like a scanned PDF. Run text recognition (OCR) to read it.")
         elif empty:
-            out.warnings.append(f"{empty} page(s) had no selectable text and were skipped.")
+            out.warnings.append(f"{empty} page(s) had no selectable text. Run text recognition (OCR) to read them.")
 
 
 def _text(data: bytes, out: Extracted, md: bool) -> None:
@@ -229,11 +240,26 @@ def _xlsx(data: bytes, out: Extracted) -> None:
     wb.close()
 
 
+def _image(data: bytes, out: Extracted) -> None:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = 60_000_000  # refuse decompression bombs
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data))
+        frames = getattr(img, "n_frames", 1)
+    except Image.DecompressionBombError as e:
+        raise ExtractionError("Image is too large.") from e
+    out.mime = Image.MIME.get(img.format, "image/png")
+    out.ocr_pages = list(range(1, min(frames, 100) + 1))
+    out.warnings.append("Image file: run text recognition (OCR) to read it.")
+
+
 def extract(data: bytes, filename: str) -> Extracted:
     kind = sniff(data, filename)
     out = Extracted(kind=kind, mime=MIME[kind])
     try:
-        {"docx": _docx, "pdf": _pdf, "csv": _csv, "xlsx": _xlsx}.get(kind, lambda d, o: _text(d, o, kind == "md"))(data, out)
+        {"docx": _docx, "pdf": _pdf, "csv": _csv, "xlsx": _xlsx, "image": _image}.get(kind, lambda d, o: _text(d, o, kind == "md"))(data, out)
     except ExtractionError:
         raise
     except Exception as e:  # parser failure on hostile or corrupted input
@@ -246,6 +272,6 @@ def extract(data: bytes, filename: str) -> Extracted:
     if flagged:
         out.warnings.append(f"{flagged} passage(s) contain text that reads like instructions to an AI system. "
                             "They are treated as document content only and are never followed.")
-    if not out.segments and not out.warnings:
+    if not out.segments and not out.warnings and not out.ocr_pages:
         out.warnings.append("No text could be extracted.")
     return out

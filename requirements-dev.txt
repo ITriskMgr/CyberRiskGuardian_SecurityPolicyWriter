@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8
 playwright>=1.45
+# Optional OCR engine when Tesseract is not installed:
+# rapidocr-onnxruntime>=1.2
