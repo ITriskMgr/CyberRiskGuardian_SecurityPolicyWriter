@@ -22,7 +22,11 @@ async function api(path, opts = {}) {
   else if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); init.headers["content-type"] = "application/json"; }
   const sep = path.includes("?") ? "&" : "?";
   const r = await fetch(`/api${path}${opts.noLang ? "" : `${sep}lang=${LANG}`}`, init);
-  if (r.status === 401 && !path.startsWith("/auth")) { location.hash = "#/login"; throw new Error("auth"); }
+  if (r.status === 401 && (path === "/auth/me" || !path.startsWith("/auth"))) {
+    ME = null; paintChrome();
+    if (!/^#\/(login|register)/.test(location.hash)) location.hash = "#/login"; else route();
+    throw new Error("auth");
+  }
   const data = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
   if (!r.ok) {
     const d = data?.detail;
@@ -55,7 +59,10 @@ async function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   paintChrome();
   if (parts[0] === "login" || parts[0] === "register") return authView(parts[0]);
-  if (!ME) { try { ME = await api("/auth/me", { noLang: true }); META = await api("/meta", { noLang: true }); paintChrome(); } catch { return; } }
+  if (!ME) {
+    try { ME = await api("/auth/me", { noLang: true }); META = await api("/meta", { noLang: true }); paintChrome(); }
+    catch { if (!/^#\/(login|register)/.test(location.hash)) location.hash = "#/login"; return; }
+  }
   if (parts[0] === "p" && parts[1]) return projectView(parts[1], parts[2] || "interview", parts[3]);
   return projectsView();
 }

@@ -48,6 +48,8 @@ async def security_headers(request: Request, call_next):
                                                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     if request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"  # always revalidate, so an updated app is picked up
     return resp
 
 

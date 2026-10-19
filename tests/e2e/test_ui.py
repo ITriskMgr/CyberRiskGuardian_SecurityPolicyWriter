@@ -44,7 +44,11 @@ def test_walkthrough(server):
         br = p.chromium.launch()
         pg = br.new_page(viewport={"width": 1280, "height": 900})
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        pg.goto(base + "/#/register")
+        pg.goto(base + "/")  # first visit, not signed in: must land on the sign-in form, not an error
+        pg.wait_for_selector("input[name=email]")
+        assert "#/login" in pg.url
+        pg.click("a[href='#/register']")
+        pg.wait_for_selector("input[name=workspace_name]")
         pg.click("button[data-lang=en]")
         pg.fill("input[name=display_name]", "Tester"); pg.fill("input[name=workspace_name]", "WS")
         pg.fill("input[name=email]", "t@example.org"); pg.fill("input[name=password]", "correct-horse-battery")
