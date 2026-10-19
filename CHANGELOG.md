@@ -3,7 +3,7 @@
 ## 0.1.0 Beta — 19 October 2026
 
 First release of the Writer as a module of CyberRiskGuardian Desktop (1.7.0 Beta). It replaces the standalone
-*CyberRiskGuardian Policy Builder* 0.2.0 (tag `policy-builder-0.2.0-beta`).
+*CyberRiskGuardian Policy Builder* 0.2.0 (branch `legacy/policy-builder-0.2.0`).
 
 - **Integrated into CyberRiskGuardian** (Governance → Security Policy Writer): shared workspace, users and RACI,
   menus, EN/FR interface, AI routing and preview. The engine runs in the local helper, standard library only.

@@ -38,7 +38,7 @@ approval frozen with a SHA-256 hash, publication, assignments, acknowledgements 
 | `docs/` | Architecture decisions, threat model, original specification. |
 
 The previous standalone application (*CyberRiskGuardian Policy Builder* 0.2.0, FastAPI) is preserved at the
-git tag `policy-builder-0.2.0-beta`; it is retired in favour of the integrated Writer.
+branch `legacy/policy-builder-0.2.0`; it is retired in favour of the integrated Writer.
 
 ## Licence
 
