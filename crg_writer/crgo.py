@@ -23,17 +23,46 @@ import re
 
 from .engine import Profile
 
-CRGO_RELEASE = "v0.10.0"
+CRGO_RELEASE = "v0.11.1"      # the release the Writer was written against; crgo_release() reports the bundled one (0.1.1, NV-W06)
 
-# Writer candidate code -> CRGO legal instrument id (crgo-legal)
-INSTRUMENT = {"QC-P39.1": "P-39.1", "QC-A2.1": "A-2.1", "CA-PIPEDA": "PIPEDA", "EU-GDPR": "GDPR", "CA-OSFI-B13": "OSFI-B-13"}
+
+def crgo_release() -> str:
+    """The release of the CRGO snapshot bundled with the desktop application (data/crgo-snapshot.json), 'v'-prefixed;
+    the constant above when no snapshot is beside this package (stand-alone use)."""
+    import json
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "data", "crgo-snapshot.json"), os.path.join(here, "data", "crgo-snapshot.json")):
+        try:
+            with open(cand, encoding="utf-8") as fh:
+                rel = str(json.load(fh).get("release") or "").strip()
+            if rel:
+                return rel if rel.startswith("v") else "v" + rel
+        except (OSError, ValueError):
+            continue
+    return CRGO_RELEASE
+
+
+# Writer candidate code -> CRGO legal instrument id (crgo-legal). 0.1.1 (NV-W03): every instrument CRGO 0.11 evaluates
+# that the Writer's ruleset covers; INSTRUMENT_LABEL names the rest, so a CRGO-applicable instrument without a clause
+# in the library is still listed to the reviewer ("CRGO candidate — no clause in the library").
+INSTRUMENT = {"QC-P39.1": "P-39.1", "QC-A2.1": "A-2.1", "QC-R22.1": "R-22.1", "QC-C1.1": "C-1.1", "CA-PIPEDA": "PIPEDA",
+              "EU-GDPR": "GDPR", "CA-OSFI-B13": "OSFI-B-13"}
+INSTRUMENT_LABEL = {
+    "CCSPA": {"en": "Critical Cyber Systems Protection Act (Canada)", "fr": "Loi sur la protection des cybersystèmes essentiels (Canada)"},
+    "ISO-IEC-27701-2025": {"en": "ISO/IEC 27701:2025 (privacy information management)", "fr": "ISO/IEC 27701:2025 (management de la protection de la vie privée)"},
+    "ISO-IEC-42001-2023": {"en": "ISO/IEC 42001:2023 (AI management system)", "fr": "ISO/IEC 42001:2023 (système de management de l’IA)"},
+    "OWASP-AGENTIC-2026": {"en": "OWASP Top 10 for Agentic Applications 2026", "fr": "OWASP Top 10 des applications agentiques 2026"},
+    "OWASP-LLM-2025": {"en": "OWASP Top 10 for LLM Applications 2025", "fr": "OWASP Top 10 des applications de grands modèles de langage 2025"},
+    "OWASP-TOP10-2025": {"en": "OWASP Top 10:2025 (web application security risks)", "fr": "OWASP Top 10:2025 (risques de sécurité des applications Web)"},
+}
 CRGO_STATE = {
     "Applicable": {"en": "applicable (CRGO evaluator)", "fr": "applicable (évaluateur CRGO)"},
     "NotApplicable": {"en": "not applicable (CRGO evaluator)", "fr": "non applicable (évaluateur CRGO)"},
     "PotentiallyApplicable": {"en": "potentially applicable — qualified review required (CRGO evaluator)",
                               "fr": "potentiellement applicable — examen par une personne qualifiée requis (évaluateur CRGO)"},
-    "Unknown": {"en": "unknown — evidence gap, organizational input required (CRGO evaluator)",
-                "fr": "inconnu — lacune de preuve, information de l’organisation requise (évaluateur CRGO)"},
+    "Unknown": {"en": "unknown — Information gap, organizational validation required (CRGO evaluator)",
+                "fr": "inconnu — Lacune d’information, validation organisationnelle requise (évaluateur CRGO)"},
 }
 
 _REF = [
@@ -92,8 +121,8 @@ def profile_proposal(p: Profile) -> dict:
     add("orgTypes", _ORG.get(p.value("ORG-06")), "ORG-06")
     if p.value("ORG-06") == "healthcare" or p.value("ORG-02") == "healthcare":
         out.setdefault("note", []).append({"value": "OrgHealthBody", "because": "ORG-06",
-                                            "text": {"en": "Health sector: whether the organization is a health body within the meaning of the law needs a qualified person.",
-                                                     "fr": "Secteur de la santé : savoir si l’organisation est un organisme de santé au sens de la loi exige une personne qualifiée."}})
+                                            "text": {"en": "Health sector: whether the organization is a health body within the meaning of the law (A-2.1, and R-22.1 for health and social services information) needs a qualified person.",
+                                                     "fr": "Secteur de la santé : savoir si l’organisation est un organisme de santé au sens de la loi (A-2.1, et R-22.1 pour les renseignements de santé et de services sociaux) exige une personne qualifiée."}})
     cats = []
     for c in p.value("DATA-01") or []:
         v = _DATA.get(c)

@@ -1,13 +1,18 @@
 # Working on this repository
 
-This repository is the source of the **CyberRiskGuardian Security Policy Writer** engine (`crg_writer/`).
-CyberRiskGuardian Desktop (`ITriskMgr/CyberRiskGuardian_ThreatIntel`, `desktop/app/`) carries a copy that its
-local helper serves at `/api/writer/<operation>`; the screens live there (`js/writer.js`, `js/panels/writer*.js`).
+This repository publishes the **CyberRiskGuardian Security Policy Writer** engine (`crg_writer/`) on its own.
+CyberRiskGuardian Desktop (`ITriskMgr/CyberRiskGuardian_ThreatIntel`, `desktop/app/`) carries the **canonical** copy,
+which its local helper serves at `/api/writer/<operation>`; the screens live there (`js/writer.js`,
+`js/panels/writer*.js`). Since 8 November 2026 (author decision D1) this repository is a byte-identical mirror of that
+copy, synced from the desktop.
 
 - `crg_writer/` uses the **Python standard library only** (the desktop helper has no dependencies). Optional
   tools (Tesseract, Poppler, pypdfium2, rapidocr) are detected at run time, never required.
-- Run `python -m pytest tests -q` before committing. After a change, copy the engine to the desktop with
-  `python3 tools/sync_to_desktop.py <desktop/app>` and run the desktop check tools there.
+- **The desktop copy is canonical** (author decision D1, 8 November 2026): make engine changes in the desktop repository
+  (`desktop/app/crg_writer/`), refresh its `WRITER_TREE_HASH` (`tools/writer_tree_hash.py --write`), then bring the copy
+  here with `python3 tools/sync_to_desktop.py <desktop/app>` (desktop → here; `--check` compares, `--to-desktop` is the
+  legacy direction, `--force` overwrites a diverged tree after showing the diff). Run `python -m pytest tests -q` before
+  committing.
 - The engine is stateless: everything the person enters lives in their CyberRiskGuardian workspace. Never add
   storage, network calls or telemetry to it.
 - Never invent organizational facts in clause text: use tokens (`{org}`, `{sec}`, `{p:DEC-…}`) or typed placeholders

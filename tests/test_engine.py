@@ -21,7 +21,7 @@ def test_engine_imports_with_the_standard_library_only():
 
 def test_meta_counts():
     m = call("meta")
-    assert m["version"] == "0.1.0" and m["documents"] == 28 and m["clauses"] == 606 and m["crgo"] == "v0.10.0"
+    assert m["version"] == "0.1.1" and m["documents"] == 28 and m["clauses"] == 606 and m["crgo"] == "v0.11.1"
 
 
 def test_express_is_short_standard_branches():
@@ -126,3 +126,14 @@ def test_rewording_validation():
     acc = {a["id"] for a in out["accepted"]}
     rej = {r["id"]: r["reason"] for r in out["rejected"]}
     assert acc == {"c"} and "normative" in rej["a"] and "numbers" in rej["b"] and rej["x"] == "unexpected id"
+
+
+def test_french_appetence_wording():
+    """NV-W01: the two copies drifted on this word; the desktop copy (canonical, D1) says « appétence », never « appétit »."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "crg_writer"
+    texts = {p: p.read_text(encoding="utf-8") for p in root.rglob("*.py")}
+    assert sum(t.count("appétence") for t in texts.values()) >= 20
+    assert not [p.name for p, t in texts.items() if "appétit" in t]
+    from crg_writer.questions import BY_CODE
+    assert "aucune n’est approuvée" in BY_CODE["GOV-01"]["help"]["fr"]

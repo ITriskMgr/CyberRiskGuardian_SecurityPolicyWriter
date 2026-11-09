@@ -14,7 +14,7 @@ from . import NAME, VERSION
 from . import evidence, ocr as OCR, quality, reimport as RI, render
 from .catalogue import BY_CODE as CAT, DECISIONS, DECISIONS_BY_POLICY, decision_applies, recommend
 from .composer import Context, compose, document_summary, placeholders, PH_RE
-from .crgo import CRGO_RELEASE, crg_refs, profile_proposal
+from .crgo import CRGO_RELEASE, crg_refs, crgo_release, profile_proposal
 from .engine import Profile, governance_observations, progress, sections_for, visible_questions
 from .isp_map import to_isp
 from .library import LIBRARY, LIBRARY_VERSION, referenced_decisions
@@ -61,8 +61,9 @@ def _bytes(b, key="data"):
 
 # ---------------------------------------------------------------- operations
 def op_meta(b):
+    # 0.1.1 (NV-W06): the CRGO release is the one of the bundled snapshot (data/crgo-snapshot.json), not a constant
     return {"name": NAME, "version": VERSION, "library": LIBRARY_VERSION, "questionnaire": QUESTIONNAIRE_VERSION,
-            "ruleset": RULESET_VERSION, "ruleset_date": RULESET_DATE, "crgo": CRGO_RELEASE, "documents": len(CAT),
+            "ruleset": RULESET_VERSION, "ruleset_date": RULESET_DATE, "crgo": crgo_release(), "documents": len(CAT),
             "clauses": sum(len(s["clauses"]) for v in LIBRARY.values() for s in v), "ocr": OCR.info()}
 
 
@@ -74,9 +75,21 @@ def op_interview(b):
             "observations": governance_observations(p, lang), "org_name": p.org_name, "prefix": p.doc_prefix}
 
 
+PARAM_RE = re.compile(r"^PARAM-[A-Z0-9-]{2,40}$")
+
+
 def op_answer(b):
     """Validate and normalize one answer: {code, value, status}."""
     code, status, value = b.get("code"), b.get("status") or "answered", b.get("value")
+    # 0.1.1 (NV-W02): a PARAM-* fact (a parameter the documents state, e.g. the password-rotation interval) is not an
+    # interview question; confirming one records the chosen value as a parameter and closes its conflict group.
+    if isinstance(code, str) and PARAM_RE.match(code):
+        if status != "answered":
+            return {"code": code, "value": None, "status": status, "param": True}
+        v = value if isinstance(value, str) else ("" if value is None else str(value))
+        if not v.strip():
+            raise ApiError("Empty value.", "Valeur vide.")
+        return {"code": code, "value": v.strip()[:300], "status": "answered", "param": True}
     q = QBY.get(code) or DEC_BY.get(code)
     if not q:
         raise ApiError("Unknown question.", "Question inconnue.", 404)
@@ -124,7 +137,7 @@ def op_legal(b):
     lang = _lang(b)
     p = _profile(b)
     return {"candidates": candidates(p, lang, b.get("applicability") or {}, b.get("crgo")), "proposal": profile_proposal(p),
-            "ruleset": RULESET_VERSION, "ruleset_date": RULESET_DATE, "crgo": CRGO_RELEASE}
+            "ruleset": RULESET_VERSION, "ruleset_date": RULESET_DATE, "crgo": crgo_release()}
 
 
 def op_decisions(b):
@@ -175,19 +188,36 @@ def op_facts(b):
 
 
 def op_ground(b):
-    """Keep only AI-proposed facts whose quote is verbatim in the text that was sent and whose type is allowed."""
+    """Keep only AI-proposed facts whose quote is verbatim in the text that was sent and whose type is allowed.
+    0.1.1 (NV-009): a quote (or a value) that itself looks like an instruction to an AI is dropped, and the quote
+    is matched with whitespace normalised, so a line the document wrote with doubled spaces still grounds a fact."""
     allowed = set(b.get("allowed") or [])
     text = b.get("text") or ""
-    out = []
+    hay = evidence.flat(text)
+    out, dropped = [], []
     for f in (b.get("facts") or [])[:60]:
         if not isinstance(f, dict) or f.get("fact_type") not in allowed:
             continue
         q = str(f.get("quote", ""))[:300]
-        if not q or q not in text:
+        if not q or evidence.flat(q) not in hay:
+            dropped.append({"fact_type": f.get("fact_type"), "why": "quote not found"})
+            continue
+        if evidence.looks_injected(q) or evidence.looks_injected(str(f.get("value", ""))):
+            dropped.append({"fact_type": f.get("fact_type"), "why": "instruction-like text"})
             continue
         out.append({"fact_type": f["fact_type"], "value": f.get("value"), "quote": q,
                     "confidence": f.get("confidence") if f.get("confidence") in ("high", "medium", "low") else "low"})
-    return {"facts": out}
+    return {"facts": out, "dropped": dropped}
+
+
+def op_ai_text(b):
+    """0.1.1 (NV-009): the text of the documents that may go to a model — decided on the text given, now."""
+    mx = b.get("max_chars")
+    try:
+        mx = max(1000, min(int(mx or 20000), 200000))
+    except (TypeError, ValueError):
+        mx = 20000
+    return evidence.ai_text(b.get("docs") or [], mx)
 
 
 NUM_RE = re.compile(r"\d+")
@@ -255,7 +285,7 @@ def op_placeholders(b):
 
 
 OPS = {"meta": op_meta, "interview": op_interview, "answer": op_answer, "catalogue": op_catalogue, "legal": op_legal,
-       "decisions": op_decisions, "compose": op_compose, "facts": op_facts, "ground": op_ground,
+       "decisions": op_decisions, "compose": op_compose, "facts": op_facts, "ground": op_ground, "ai_text": op_ai_text,
        "validate_rewording": op_validate_rewording, "docx": op_docx, "reimport": op_reimport, "ocr": op_ocr,
        "placeholders": op_placeholders}
 

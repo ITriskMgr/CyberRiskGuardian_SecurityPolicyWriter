@@ -141,7 +141,7 @@ def sections_for(profile: Profile, mode: str, lang: str) -> list[dict]:
 
 
 def governance_observations(profile: Profile, lang: str) -> list[dict]:
-    """Governance patterns from *Introduction to Cybersecurity Governance* Ch. 22 detectable from answers.
+    """Governance patterns from *Introduction to Cybersecurity Governance for Business Technology Management* (v2.51), Chapter 21 (People, organizational design and accountability) detectable from answers.
     These are observations to discuss, never facts written into a policy."""
     t = (lambda en, fr: fr if lang == "fr" else en)
     obs = []

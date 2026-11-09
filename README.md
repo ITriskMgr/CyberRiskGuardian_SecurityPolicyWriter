@@ -8,7 +8,8 @@ approval frozen with a SHA-256 hash, publication, assignments, acknowledgements 
 
 **The Writer writes; CyberRiskGuardian manages.**
 
-> **Beta 0.1.0**, shipped in CyberRiskGuardian Desktop **1.7.0 Beta** (Governance → Security Policy Writer).
+> **Beta 0.1.1**, shipped in CyberRiskGuardian Desktop **1.9.2 Beta** (Governance → Security Policy Writer). Since
+> 8 November 2026 the desktop copy of the engine is canonical (author decision D1); this repository is synced from it.
 > Drafts are not legal advice and are not in force until the organization's authorized people approve and
 > publish them. A control reference shows the topic a statement addresses; it is never evidence of compliance.
 
@@ -33,7 +34,7 @@ approval frozen with a SHA-256 hash, publication, assignments, acknowledgements 
 |---|---|
 | `crg_writer/` | The engine, Python standard library only: questionnaire, catalogue, 606 bilingual clause definitions, composer, CRGO mapping, ISP mapping, quality checks, evidence and fact extraction, OCR, Word writer and reader, re-import. `api.handle(op, body)` is what the desktop helper calls. |
 | `tests/` | `python -m pytest tests -q` (python-docx and Pillow are optional cross-checks; Tesseract and LibreOffice tests run when installed). |
-| `tools/sync_to_desktop.py` | Copies the engine into a CyberRiskGuardian Desktop folder. |
+| `tools/sync_to_desktop.py` | Keeps the engine in step with the CyberRiskGuardian Desktop copy (desktop → here by default, D1; `--check`, `--to-desktop`, `--force`). |
 | `tools/make_samples.py`, `samples/` | Word drafts for the fictional Northstar company. |
 | `docs/` | Architecture decisions, threat model, original specification. |
 
@@ -57,8 +58,9 @@ français ou dans les deux langues**. La **gestion des PSI** de CyberRiskGuardia
 approbation figée par une empreinte SHA-256, publication, affectations, prises de connaissance et dérogations.
 **Le rédacteur rédige; CyberRiskGuardian gère.**
 
-> **Bêta 0.1.0**, livrée dans CyberRiskGuardian Desktop **1.7.0 bêta** (Gouvernance → Rédacteur de politiques de
-> sécurité). Les brouillons ne constituent pas un avis juridique et ne sont pas en vigueur tant que les personnes
+> **Bêta 0.1.1**, livrée dans CyberRiskGuardian Desktop **1.9.2 bêta** (Gouvernance → Rédacteur de politiques de
+> sécurité). Depuis le 8 novembre 2026, la copie du moteur dans l'application de bureau est la référence (décision D1
+> de l'auteur); ce dépôt est synchronisé à partir d'elle. Les brouillons ne constituent pas un avis juridique et ne sont pas en vigueur tant que les personnes
 > autorisées de l'organisation ne les ont pas approuvés et publiés.
 
 Étapes : Départ · Entrevue · Documents et faits (citations, conflits, ROC sur l'ordinateur) · Applicabilité

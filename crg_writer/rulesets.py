@@ -37,6 +37,27 @@ OBLIGATIONS = [
      "observed": _t("Quebec operations and a public, educational or healthcare status.", "Activités au Québec et statut public, d’enseignement ou de santé."),
      "confirm": _t("Confirm whether the organization is a “public body” within the meaning of the Act.", "Confirmer si l’organisation est un « organisme public » au sens de la Loi."),
      "policies": ["PRIV", "IR", "CLASS"]},
+    # 0.1.1 (NV-W03): the two Quebec instruments CRGO evaluates that the ruleset left out — the main law for a clinic
+    {"code": "QC-R22.1", "kind": "law", "jurisdiction": "Quebec",
+     "name": _t("Act respecting health and social services information (CQLR c. R-22.1)",
+                "Loi sur les renseignements de santé et de services sociaux (RLRQ c. R-22.1)"),
+     "url": "https://www.legisquebec.gouv.qc.ca/en/document/cs/R-22.1",
+     "when": lambda p: p.has("ORG-05", "QC") and (p.has("DATA-01", "health") or p.value("ORG-06") == "healthcare" or p.value("ORG-02") == "healthcare"),
+     "observed": _t("Quebec operations and health or social services information, or a health-sector organization.",
+                    "Activités au Québec et renseignements de santé ou de services sociaux, ou organisation du secteur de la santé."),
+     "confirm": _t("Confirm whether the organization is a health and social services body, a private professional practice or another body governed by the Act, and which information is covered.",
+                   "Confirmer si l’organisation est un organisme du secteur de la santé et des services sociaux, un cabinet privé de professionnels ou un autre organisme visé par la Loi, et quels renseignements sont visés."),
+     "policies": ["PRIV", "IR", "CLASS", "IAM", "LOG"]},
+    {"code": "QC-C1.1", "kind": "law", "jurisdiction": "Quebec",
+     "name": _t("Act to establish a legal framework for information technology (CQLR c. C-1.1)",
+                "Loi concernant le cadre juridique des technologies de l’information (RLRQ c. C-1.1)"),
+     "url": "https://www.legisquebec.gouv.qc.ca/en/document/cs/C-1.1",
+     "when": lambda p: p.has("ORG-05", "QC") and (p.handles_pi or p.has("TECH-01", "m365", "google_ws", "aws", "azure", "gcp", "saas_other")),
+     "observed": _t("Quebec operations with technology-based documents (electronic records, signatures, transmission or retention).",
+                    "Activités au Québec avec des documents technologiques (dossiers, signatures, transmission ou conservation électroniques)."),
+     "confirm": _t("Confirm which documents are kept or transmitted as technology-based documents and the integrity, retention and identification duties that follow.",
+                   "Confirmer quels documents sont conservés ou transmis sous forme technologique et les obligations d’intégrité, de conservation et d’identification qui en découlent."),
+     "policies": ["CLASS", "LOG", "BACKUP", "IAM"]},
     {"code": "QC-G1.03", "kind": "law", "jurisdiction": "Quebec",
      "name": _t("Act respecting the governance and management of the information resources of public bodies and government enterprises (CQLR c. G-1.03) and the Government directive on information security",
                 "Loi sur la gouvernance et la gestion des ressources informationnelles des organismes publics et des entreprises du gouvernement (RLRQ c. G-1.03) et Directive gouvernementale sur la sécurité de l’information"),
@@ -137,8 +158,10 @@ KIND_LABEL = {
 
 def candidates(p: Profile, lang: str, decisions: dict[str, dict], crgo_results: dict | None = None) -> list[dict]:
     """Candidates for the reviewer. For instruments CRGO evaluates, the CRGO evaluator's state (from
-    Compliance → Legal applicability) is attached as evidence; it never replaces the named reviewer."""
-    from .crgo import CRGO_STATE, crgo_status
+    Compliance → Legal applicability) is attached as evidence; it never replaces the named reviewer.
+    0.1.1 (NV-W03): an instrument CRGO finds applicable (or potentially applicable) that no ruleset entry covers is
+    listed too, as "CRGO candidate — no clause in the library", so the reviewer sees it rather than nothing."""
+    from .crgo import CRGO_STATE, INSTRUMENT, INSTRUMENT_LABEL, crgo_status
     out = []
     for ob in OBLIGATIONS:
         try:
@@ -162,6 +185,30 @@ def candidates(p: Profile, lang: str, decisions: dict[str, dict], crgo_results: 
             "decision": dec,
             "verification": ("Not verified — reviewer confirmation required" if lang == "en"
                              else "Non vérifié — confirmation d’un réviseur requise") if not dec or dec["status"] != "applies" else "",
+            "ruleset_version": RULESET_VERSION,
+        })
+    covered = set(INSTRUMENT.values())
+    for inst, res in ((crgo_results or {}).get("results") or {}).items():
+        state = (res or {}).get("state") if isinstance(res, dict) else None
+        if inst in covered or state not in ("Applicable", "PotentiallyApplicable"):
+            continue
+        code = "CRGO-" + inst
+        dec = decisions.get(code)
+        cs = {"instrument": inst, "state": state, "date": crgo_results.get("date"), "source": crgo_results.get("source"),
+              "release": crgo_results.get("release"), "undetermined": (res or {}).get("undetermined", []), "met": (res or {}).get("met", [])}
+        label = INSTRUMENT_LABEL.get(inst, {}).get(lang) or inst
+        out.append({
+            "code": code, "kind": "framework" if inst.startswith(("ISO", "OWASP")) else "law", "kind_label": KIND_LABEL["framework" if inst.startswith(("ISO", "OWASP")) else "law"][lang],
+            "jurisdiction": "CRGO", "name": label, "url": "", "url2": "",
+            "observed": ("The CRGO evaluator finds this instrument applicable from the organisation profile." if lang == "en"
+                         else "L’évaluateur CRGO juge cet instrument applicable d’après le profil de l’organisation."),
+            "confirm": ("CRGO candidate — no clause in the library: the Writer drafts nothing for it; record the decision here and address it by hand." if lang == "en"
+                        else "Candidat CRGO — aucune clause dans la bibliothèque : le rédacteur ne rédige rien pour cet instrument ; consignez la décision ici et traitez-le manuellement."),
+            "policies": [], "triggered": True, "writer_rule": False, "no_clause": True,
+            "crgo": cs, "crgo_label": CRGO_STATE[state][lang],
+            "suggested": "applies" if state == "Applicable" else "needs_legal_review",
+            "status": dec["status"] if dec else "candidate", "decision": dec,
+            "verification": ("Not verified — reviewer confirmation required" if lang == "en" else "Non vérifié — confirmation d’un réviseur requise") if not dec or dec["status"] != "applies" else "",
             "ruleset_version": RULESET_VERSION,
         })
     return out
