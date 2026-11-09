@@ -10,6 +10,6 @@ Standard library only: the CyberRiskGuardian helper (serve.py) imports this pack
 © 2026 Marc-André Léger. CC BY-NC 4.0
 """
 NAME = "CyberRiskGuardian Security Policy Writer"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 CHANNEL = "beta"
 LABEL = f"{VERSION} {CHANNEL}"
